@@ -48,11 +48,11 @@ const API_ID = parseInt(process.env.API_ID || "26433676");
 const API_HASH = process.env.API_HASH || "27a7326126594494a3bca73afc6c4295";
 const client = new TelegramClient(new StringSession(sessionString), API_ID, API_HASH, { connectionRetries: 5 });
 
-// ─── STATE ────────────────────────────────────────────────────────────────────
 const userStates = new Map();
 const adminStates = new Map();
 const cleanStates = new Map();
 const renameStates = new Map();
+const userServerChoice = new Map(); // <-- TAMBAH INI
 
 // ─── FILE PATHS ───────────────────────────────────────────────────────────────
 const DB_PATH          = "./users.json";
@@ -632,6 +632,20 @@ async function handleStart(event, delId = null) {
   const username = sender?.username ? `@${sender.username}` : "—";
   const name     = sender?.firstName || "User";
 
+  // ─── CLEANUP STATE SAAT USER START ──────────────────────────────────────
+  // Hapus semua state sementara user
+  userStates.delete(userId);
+  adminStates.delete(userId);
+  cleanStates.delete(userId);
+  renameStates.delete(userId);
+  userServerChoice.delete(userId);
+  
+  // Hapus job sementara (waiting_server) jika ada
+  const job = getUserJob(userId);
+  if (job && job.status === "waiting_server") {
+    removeUserJob(userId);
+  }
+
   if (mdb.isEnabled() && !isPrivileged(userId)) {
     const m = mdb.get();
     await sendHtml(chatId,
@@ -686,29 +700,29 @@ async function handleStart(event, delId = null) {
   }
 
   const joined = await isJoinedChannel(userId);
-if (!joined) {
-  await sendHtml(
-    chatId,
-    `Akses Terbatas!\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `<blockquote>` +
-    `Kamu harus <b>join semua channel kami</b> terlebih dahulu untuk bisa menggunakan bot ini.\n\n` +
-    `Setelah join, tekan tombol <b>Verifikasi Join</b> di bawah.` +
-    `</blockquote>`,
-    [
+  if (!joined) {
+    await sendHtml(
+      chatId,
+      `Akses Terbatas!\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `Kamu harus <b>join semua channel kami</b> terlebih dahulu untuk bisa menggunakan bot ini.\n\n` +
+      `Setelah join, tekan tombol <b>Verifikasi Join</b> di bawah.` +
+      `</blockquote>`,
       [
-        { text: "JOIN1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
-        { text: "JOIN2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
-        { text: "JOIN3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
+        [
+          { text: "JOIN1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
+          { text: "JOIN2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
+          { text: "JOIN3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
+        ],
+        [
+          { text: "Verifikasi Join", data: "check_join" }
+        ]
       ],
-      [
-        { text: "Verifikasi Join", data: "check_join" }
-      ]
-    ],
-    delId
-  );
-  return;
-}
+      delId
+    );
+    return;
+  }
 
   const roleLine = isOwner(userId)
     ? `\nRole: <code>OWNER</code> — Prioritas Tertinggi\n`
@@ -733,8 +747,8 @@ if (!joined) {
     `\n<blockquote>` +
     `CARA PAKAI:\n` +
     `1 Klik <b>Mulai Build APK</b>\n` +
-    `2 Pilih mode Release atau Debug\n` +
-    `3 Pilih server build yang tersedia\n` +
+    `2 Pilih server build yang tersedia\n` +
+    `3 Pilih mode Release atau Debug\n` +
     `4 Kirim file <b>.zip</b> project Flutter kamu\n` +
     `5 Tunggu proses build di cloud\n` +
     `6 APK dikirim otomatis ke sini` +
@@ -773,19 +787,29 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
     return;
   }
 
+  // CEK APAKAH ADA BUILD AKTIF (BUKAN waiting_server)
   if (isUserBuilding(userId)) {
     const job = getUserJob(userId);
-    await sendHtml(chatId,
-      `Build Sedang Aktif!\n\n` +
-      `<blockquote>` +
-      `Status  : ${statusLabel(job.status)}\n` +
-      `Berjalan: ${formatDuration(elapsedSec(job.updatedAt || Date.now()))}` +
-      `</blockquote>\n\n` +
-      `<i>Tunggu hingga selesai atau batalkan dulu.</i>`,
-      [[{ text: "Batalkan Build", data: "cancel" }]], delId
-    );
-    return;
+    // JIKA STATUSNYA waiting_server, ANGGAP TIDAK AKTIF
+    if (job && job.status === "waiting_server") {
+      // HAPUS JOB SEMENTARA
+      removeUserJob(userId);
+    } else {
+      await sendHtml(chatId,
+        `Build Sedang Aktif!\n\n` +
+        `<blockquote>` +
+        `Status  : ${statusLabel(job.status)}\n` +
+        `Berjalan: ${formatDuration(elapsedSec(job.updatedAt || Date.now()))}` +
+        `</blockquote>\n\n` +
+        `<i>Tunggu hingga selesai atau batalkan dulu.</i>`,
+        [[{ text: "Batalkan Build", data: "cancel" }]], delId
+      );
+      return;
+    }
   }
+
+  // AMBIL SERVER YANG SUDAH DIPILIH (DARI STATE TERPISAH)
+  let selectedServer = userServerChoice.get(userId);
 
   if (!buildType) {
     // Tampilkan pilihan server dulu
@@ -793,10 +817,21 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
       { text: `🖥️ ${s.name}`, data: `select_server_${s.id}` }
     ]);
 
+    let serverInfo = "";
+    if (selectedServer) {
+      const server = SERVERS.find(s => s.id === selectedServer);
+      if (server) {
+        serverInfo = `\n\n✅ <b>Server Terpilih:</b> ${server.name}`;
+      }
+    } else {
+      serverInfo = `\n\n⚠️ <b>Pilih server terlebih dahulu!</b>`;
+    }
+
     return await sendHtml(chatId,
       `Pilih Server Build\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<blockquote>` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      serverInfo +
+      `\n\n<blockquote>` +
       `<b>Pilih server yang akan digunakan:</b>\n` +
       `Pilih salah satu server di bawah ini.` +
       `</blockquote>\n\n` +
@@ -808,18 +843,20 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
     );
   }
 
-  // Server sudah dipilih, lanjut ke mode build
-  const job = getUserJob(userId);
-  if (!job || !job.serverId) {
+  // CEK APAKAH SERVER SUDAH DIPILIH
+  if (!selectedServer) {
     await sendHtml(chatId,
-      `⚠️ Server tidak terpilih!\n\n` +
-      `<blockquote>Silakan pilih server terlebih dahulu.</blockquote>`,
-      [[{ text: "Pilih Server", data: "build" }]], delId
+      `⚠️ <b>Pilih Server Terlebih Dahulu!</b>\n\n` +
+      `Klik tombol server di bawah sebelum memulai build.`,
+      [
+        ...SERVERS.map(s => [{ text: `🖥️ ${s.name}`, data: `select_server_${s.id}` }]),
+        [{ text: "Kembali", data: "start" }]
+      ], delId
     );
     return;
   }
 
-  const serverModule = getServerModule(job.serverId);
+  const serverModule = getServerModule(selectedServer);
   if (!serverModule) {
     await sendHtml(chatId,
       `❌ Server tidak tersedia!\n\n` +
@@ -837,13 +874,17 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
   } catch (_) {}
 
   const priority = getUserPriority(userId);
+  
+  // SEKARANG BARU BUAT JOB DENGAN STATUS waiting_zip
   setUserJob(userId, { 
-    ...job,
     chatId, userId, username, fullName, buildType, 
-    status: "waiting_zip", updatedAt: Date.now(), priority,
+    status: "waiting_zip", 
+    updatedAt: Date.now(), 
+    priority,
+    serverId: selectedServer
   });
 
-  const serverInfo = `\n\n🖥️ <b>Server:</b> ${getServerName(job.serverId)}`;
+  const serverInfo = `\n\n🖥️ <b>Server:</b> ${getServerName(selectedServer)}`;
   
   const prioMsg = priority === 1
     ? `\n\n<blockquote><b>OWNER PRIORITY (Level 1)</b> — Build diproses paling depan!</blockquote>`
@@ -2924,33 +2965,28 @@ async function handleCallback(event) {
     const msgId  = event.messageId;
 
     // ─── SERVER SELECTION ────────────────────────────────────────────────────
-    if (data.startsWith("select_server_")) {
-      const serverId = data.replace("select_server_", "");
-      const server = SERVERS.find(s => s.id === serverId);
-      if (!server) {
-        return await event.answer({ message: "Server tidak ditemukan!", alert: true });
-      }
+if (data.startsWith("select_server_")) {
+  const serverId = data.replace("select_server_", "");
+  const server = SERVERS.find(s => s.id === serverId);
+  if (!server) {
+    return await event.answer({ message: "Server tidak ditemukan!", alert: true });
+  }
 
-      // Simpan server yang dipilih ke job
-      const job = getUserJob(userId);
-      if (job) {
-        setUserJob(userId, { ...job, serverId: serverId });
-      } else {
-        // Buat job sementara dengan server
-        setUserJob(userId, { 
-          status: "waiting_server", 
-          serverId: serverId,
-          userId: userId,
-          updatedAt: Date.now() 
-        });
-      }
+  // SIMPAN PILIHAN SERVER DI STATE TERPISAH
+  userServerChoice.set(userId, serverId);
 
-      await event.answer({ message: `Server ${server.name} dipilih!` });
+  // HAPUS JOB SEMENTARA JIKA ADA
+  const job = getUserJob(userId);
+  if (job && job.status === "waiting_server") {
+    removeUserJob(userId);
+  }
 
-      // Tampilkan pilihan mode build
-      await handleBuild(chatId, userId, null, msgId);
-      return;
-    }
+  await event.answer({ message: `✅ Server ${server.name} dipilih!` });
+
+  // TAMPILKAN PILIHAN MODE BUILD
+  await handleBuild(chatId, userId, null, msgId);
+  return;
+}
 
     if (data.startsWith("broadcast_approve_")) {
       if (!isOwner(userId)) return await event.answer({ message: "Hanya Owner!", alert: true });
@@ -3226,12 +3262,13 @@ async function handleCallback(event) {
     if (data === "status")        return await handleStatus(chatId, userId, msgId);
 
     if (data === "cancel") {
-      removeUserJob(userId);
-      return await sendHtml(chatId,
-        `Dibatalkan.\n\n<blockquote>Ketik /start atau klik tombol di bawah untuk kembali ke menu utama.</blockquote>`,
-        [[{ text: "Menu Utama", data: "start" }]], msgId
-      );
-    }
+  removeUserJob(userId);
+  userServerChoice.delete(userId); // <-- TAMBAH INI
+  return await sendHtml(chatId,
+    `Dibatalkan.\n\n<blockquote>Ketik /start atau klik tombol di bawah untuk kembali ke menu utama.</blockquote>`,
+    [[{ text: "Menu Utama", data: "start" }]], msgId
+  );
+}
   } catch (err) {
     console.error("Callback error:", err);
   }
