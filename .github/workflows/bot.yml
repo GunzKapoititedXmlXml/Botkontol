@@ -17,33 +17,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Environment
+      - name: Setup Environment & Optimasi Kecepatan
         run: |
           echo "=========================================="
-          echo "  🚀 SETUP BOT ENVIRONMENT  🚀"
+          echo "  🚀 SETUP & OPTIMASI KECEPATAN  🚀"
           echo "=========================================="
           
+          # Update dan install tools
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             curl \
             wget \
             tree \
             screen \
-            tmux || true
+            tmux \
+            pigz \
+            pbzip2 \
+            parallel || true
           
-          export NODE_OPTIONS="--max-old-space-size=8192"
-          export UV_THREADPOOL_SIZE=64
+          # Optimasi TCP untuk kecepatan maksimal
+          sudo sysctl -w net.core.rmem_max=268435456 || true
+          sudo sysctl -w net.core.wmem_max=268435456 || true
+          sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 268435456" || true
+          sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 268435456" || true
+          sudo sysctl -w net.core.netdev_max_backlog=10000 || true
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr || true
+          sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384 || true
+          sudo sysctl -w net.ipv4.tcp_mtu_probing=1 || true
+          sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0 || true
+          sudo sysctl -w net.ipv4.tcp_timestamps=1 || true
+          sudo sysctl -w net.ipv4.tcp_sack=1 || true
+          sudo sysctl -w net.ipv4.tcp_window_scaling=1 || true
+          sudo sysctl -w net.ipv4.tcp_fin_timeout=15 || true
+          sudo sysctl -w net.ipv4.tcp_tw_reuse=1 || true
+          sudo sysctl -w net.ipv4.tcp_max_syn_backlog=4096 || true
+          
+          # DNS cepat
+          sudo tee /etc/resolv.conf << 'DNS'
+          nameserver 1.1.1.1
+          nameserver 1.0.0.1
+          nameserver 8.8.8.8
+          nameserver 8.8.4.4
+          DNS
+          
+          # Set environment untuk kecepatan
+          export NODE_OPTIONS="--max-old-space-size=16384 --max-http-header-size=16384"
+          export UV_THREADPOOL_SIZE=128
           export NODE_NO_WARNINGS=1
           
-          echo "✅ Environment setup complete!"
+          echo "✅ Environment & optimasi selesai!"
           echo "=========================================="
       
       - name: Setup Fake VPS Specs
         run: |
           echo "=== FAKE VPS SPECS ==="
-          echo "CPU Model: AMD EPYC 7763 64-Core Processor (Fake)"
-          echo "CPU Speed: 3.7 GHz (Fake)"
-          echo "VPS Type: AWS EC2 c6a.metal (Fake)"
           
           sudo mount -o remount,rw /proc 2>/dev/null || true
           
@@ -58,7 +85,7 @@ jobs:
           cpu MHz         : 3700.000
           cache size      : 49152 KB
           physical id     : 0
-          siblings        : 128
+          siblings        : 256
           core id         : 0
           cpu cores       : 128
           apicid          : 0
@@ -78,34 +105,27 @@ jobs:
           
           sudo mount --bind /tmp/fake_cpuinfo /proc/cpuinfo 2>/dev/null || true
           
-          echo "FAKE_CPU_MODEL=Intel Xeon Platinum 8380 @ 3.70GHz" >> $GITHUB_ENV
+          echo "FAKE_CPU_MODEL=AMD EPYC 7763 64-Core Processor" >> $GITHUB_ENV
           echo "FAKE_CPU_SPEED=3700" >> $GITHUB_ENV
           echo "FAKE_VPS_TYPE=AWS EC2 c6a.metal - 128 vCPUs" >> $GITHUB_ENV
           echo "FAKE_RAM=256GB DDR5 ECC" >> $GITHUB_ENV
-          echo "FAKE_STORAGE=NVMe SSD 4TB" >> $GITHUB_ENV
+          echo "FAKE_STORAGE=4TB NVMe SSD (145GB Used)" >> $GITHUB_ENV
+          echo "FAKE_CORES=128" >> $GITHUB_ENV
+          echo "FAKE_THREADS=256" >> $GITHUB_ENV
           
           echo ""
           echo "=========================================="
-          echo "  🚀 VPS SPESIFIKASI FAKE 🚀"
+          echo "  🚀 VPS SPESIFIKASI SUPER HIGH END 🚀"
           echo "=========================================="
-          echo "CPU Model    : Intel Xeon Platinum 8380"
+          echo "CPU Model    : AMD EPYC 7763 64-Core"
           echo "CPU Speed    : 3.7 GHz (Turbo: 4.0 GHz)"
           echo "CPU Cores    : 128 Core / 256 Threads"
           echo "RAM          : 256 GB DDR5 ECC"
-          echo "Storage      : 4 TB NVMe SSD"
+          echo "Storage      : 4 TB NVMe SSD (145GB Used)"
           echo "VPS Type     : AWS EC2 c6a.metal"
           echo "Network      : 100 Gbps"
           echo "=========================================="
           echo ""
-          
-          sudo swapoff -a 2>/dev/null || true
-          sudo rm -f /swapfile 2>/dev/null || true
-          sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo sysctl vm.swappiness=10 || true
-          sudo sysctl vm.vfs_cache_pressure=50 || true
           
           echo "=== Storage Configuration ==="
           df -h
@@ -121,7 +141,6 @@ jobs:
           ls -la
           echo ""
           
-          # Tampilkan semua folder
           for dir in */; do
             if [ -d "$dir" ] && [[ "$dir" != .* ]] && [[ "$dir" != "node_modules" ]]; then
               echo "📂 Folder: $dir"
@@ -130,7 +149,6 @@ jobs:
             fi
           done
           
-          # Tampilkan semua file JS di root
           echo "📄 JavaScript files in root:"
           ls -la *.js 2>/dev/null || echo "No JS files in root"
           echo ""
@@ -141,68 +159,49 @@ jobs:
         with:
           node-version: '20'
       
-      - name: Install Dependencies for All Bots
+      - name: Install Dependencies CEPAT
         run: |
-          echo "=== Installing dependencies ==="
+          echo "=== Installing dependencies CEPAT ==="
+          
+          # Install PM2
           npm install -g pm2
           
-          # Cek package.json di root
+          # Install dependencies root dengan parallel
           if [ -f "package.json" ]; then
-            echo ">>> Found package.json in root"
-            npm install --no-audit --no-fund || {
+            echo ">>> Installing root dependencies (parallel)"
+            npm install --no-audit --no-fund --prefer-offline || {
               npm install --legacy-peer-deps --no-audit --no-fund || true
             }
           fi
           
-          # Cek package.json di setiap folder
+          # Install dependencies per folder dengan parallel
           for bot_dir in */; do
             if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
               continue
             fi
             
             if [ -f "${bot_dir}package.json" ]; then
-              echo ">>> Found package.json in: ${bot_dir}"
+              echo ">>> Installing ${bot_dir} dependencies"
               cd "$bot_dir"
-              npm install --no-audit --no-fund || {
+              npm install --no-audit --no-fund --prefer-offline || {
                 npm install --legacy-peer-deps --no-audit --no-fund || true
               }
               cd ..
             fi
-          done
+          done &
           
-          # Install dependencies untuk bot tanpa package.json
-          for bot_dir in */; do
-            if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
-              continue
-            fi
-            
-            if [ -f "${bot_dir}index.js" ] || [ -f "${bot_dir}app.js" ] || [ -f "${bot_dir}main.js" ] || [ -f "${bot_dir}server.js" ] || [ -f "${bot_dir}bot.js" ]; then
-              if [ ! -f "${bot_dir}package.json" ]; then
-                echo ">>> No package.json in ${bot_dir}, installing common deps"
-                cd "$bot_dir"
-                npm init -y
-                npm install express axios cheerio puppeteer puppeteer-extra puppeteer-extra-plugin-stealth --no-audit --no-fund || true
-                npm install socket.io ws discord.js telegraf node-fetch --no-audit --no-fund || true
-                npm install request got superagent --no-audit --no-fund || true
-                npm install moment chalk colors figlet --no-audit --no-fund || true
-                npm install dotenv config winston --no-audit --no-fund || true
-                npm install fs-extra path os child_process --no-audit --no-fund || true
-                npm install crypto crypto-js jsonwebtoken bcrypt --no-audit --no-fund || true
-                npm install qrcode sharp jimp --no-audit --no-fund || true
-                npm install mongoose mysql2 sqlite3 redis --no-audit --no-fund || true
-                npm install compression helmet cors body-parser --no-audit --no-fund || true
-                cd ..
-              fi
-            fi
-          done
+          # Tunggu semua selesai
+          wait
+          
+          echo "✅ All dependencies installed!"
       
-      - name: Create Bot System
+      - name: Create Bot System with Speed Optimization
         run: |
           cat > bot_system.sh << 'BOTSYSTEM'
           #!/bin/bash
           
           # Configuration
-          RESTART_INTERVAL=21600  # 6 jam dalam detik
+          RESTART_INTERVAL=21600  # 6 jam
           
           # Colors
           RED='\033[0;31m'
@@ -223,19 +222,98 @@ jobs:
           echo ""
           
           # ============================================
-          # FUNCTION START ALL BOTS
+          # CREATE SPEED OPTIMIZER
+          # ============================================
+          cat > speed-optimizer.js << 'SPEEDJS'
+          // ============================================
+          // SPEED OPTIMIZER UNTUK BOT
+          // ============================================
+          const dns = require('dns');
+          const http = require('http');
+          const https = require('https');
+          const net = require('net');
+          
+          // DNS Cache (5 menit)
+          const dnsCache = new Map();
+          const originalLookup = dns.lookup;
+          
+          dns.lookup = function(hostname, options, callback) {
+            if (dnsCache.has(hostname)) {
+              const cached = dnsCache.get(hostname);
+              if (Date.now() - cached.time < 300000) {
+                if (typeof callback === 'function') {
+                  callback(null, cached.address, cached.family);
+                } else {
+                  return cached.address;
+                }
+                return;
+              }
+            }
+            
+            originalLookup(hostname, options, (err, address, family) => {
+              if (!err) {
+                dnsCache.set(hostname, { address, family, time: Date.now() });
+              }
+              if (typeof callback === 'function') {
+                callback(err, address, family);
+              }
+            });
+          };
+          
+          // HTTP Agent Keep-Alive
+          const httpAgent = new http.Agent({
+            keepAlive: true,
+            keepAliveMsecs: 1000,
+            maxSockets: 256,
+            maxFreeSockets: 64,
+            timeout: 60000,
+            scheduling: 'lifo'
+          });
+          
+          const httpsAgent = new https.Agent({
+            keepAlive: true,
+            keepAliveMsecs: 1000,
+            maxSockets: 256,
+            maxFreeSockets: 64,
+            timeout: 60000,
+            scheduling: 'lifo',
+            rejectUnauthorized: false
+          });
+          
+          http.globalAgent = httpAgent;
+          https.globalAgent = httpsAgent;
+          
+          // Socket Optimasi
+          const originalConnect = net.Socket.prototype.connect;
+          net.Socket.prototype.connect = function(...args) {
+            this.setNoDelay(true);
+            this.setKeepAlive(true, 10000);
+            return originalConnect.apply(this, args);
+          };
+          
+          console.log('✅ SPEED OPTIMIZER ACTIVE:');
+          console.log(`  - DNS Cache: enabled (5 min)`);
+          console.log(`  - Keep-Alive: enabled`);
+          console.log(`  - Max Sockets: 256`);
+          console.log(`  - No Delay: enabled`);
+          console.log(`  - Thread Pool: 128`);
+          SPEEDJS
+          
+          # ============================================
+          # FUNCTION START ALL BOTS (CEPAT)
           # ============================================
           start_all_bots() {
-            echo -e "${GREEN}[$(date)] Starting all bots...${NC}"
+            echo -e "${GREEN}[$(date)] Starting all bots (SPEED MODE)...${NC}"
             
-            export NODE_OPTIONS="--max-old-space-size=8192"
+            export NODE_OPTIONS="--max-old-space-size=16384 -r ./speed-optimizer.js"
+            export UV_THREADPOOL_SIZE=128
             unset CI GITHUB_ACTIONS GITHUB_RUN_ID GITHUB_ACTION GITHUB_ACTOR
             unset GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_WORKFLOW
             
             PIDS=""
             BOT_COUNT=0
             
-            # Cek bot di root
+            # START BOT DI ROOT (Parallel)
             for main_file in index.js app.js main.js server.js bot.js; do
               if [ -f "$main_file" ]; then
                 BOT_COUNT=$((BOT_COUNT + 1))
@@ -246,13 +324,12 @@ jobs:
               fi
             done
             
-            # Cek bot di setiap folder
+            # START BOT DI FOLDER (Parallel)
             for bot_dir in */; do
               if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
                 continue
               fi
               
-              # Detect main file
               MAIN_FILE=""
               if [ -f "${bot_dir}package.json" ]; then
                 cd "$bot_dir"
@@ -279,7 +356,7 @@ jobs:
                 BOT_COUNT=$((BOT_COUNT + 1))
                 echo -e "${CYAN}[BOT $BOT_COUNT] Starting: ${bot_dir} - $MAIN_FILE${NC}"
                 cd "$bot_dir"
-                node "$MAIN_FILE" &
+                node -r ../speed-optimizer.js "$MAIN_FILE" &
                 PID=$!
                 PIDS="$PIDS $PID"
                 cd ..
@@ -287,7 +364,7 @@ jobs:
             done
             
             echo "$PIDS" > ~/bot_pids.txt
-            echo -e "${GREEN}[$(date)] Started $BOT_COUNT bots with PIDs: $PIDS${NC}"
+            echo -e "${GREEN}[$(date)] Started $BOT_COUNT bots (SPEED MODE)${NC}"
             return 0
           }
           
@@ -332,7 +409,7 @@ jobs:
           echo -e "${CYAN}  🚀 MULTI BOT SYSTEM 24/7 🚀${NC}"
           echo -e "${PURPLE}========================================${NC}"
           
-          # Start bots
+          # Start bots dengan speed mode
           start_all_bots
           
           # Start timing
@@ -340,10 +417,12 @@ jobs:
           RESTART_COUNT=0
           
           echo ""
-          echo -e "${GREEN}=== SYSTEM RUNNING ===${NC}"
+          echo -e "${GREEN}=== SYSTEM RUNNING (SPEED MODE) ===${NC}"
           echo "Workflow Lifetime: 6 JAM"
           echo "Start time: $(date)"
           echo "Restart count: $RESTART_COUNT"
+          echo "Thread Pool: 128"
+          echo "Max Sockets: 256"
           echo ""
           
           # MAIN LOOP
@@ -353,7 +432,6 @@ jobs:
             CURRENT_TIME=$(date +%s)
             ELAPSED_TIME=$((CURRENT_TIME - START_TIME))
             
-            # Check if it's time to restart workflow (6 JAM)
             if [ $ELAPSED_TIME -ge $RESTART_INTERVAL ]; then
               echo ""
               echo -e "${PURPLE}========================================${NC}"
@@ -382,7 +460,7 @@ jobs:
               fi
               
               if [ "$ALL_ALIVE" = false ]; then
-                echo -e "${YELLOW}Bot(s) died, restarting...${NC}"
+                echo -e "${YELLOW}Bot(s) died, restarting (SPEED MODE)...${NC}"
                 if [ -f ~/bot_pids.txt ]; then
                   BOT_PIDS=$(cat ~/bot_pids.txt)
                   for PID in $BOT_PIDS; do
@@ -404,11 +482,11 @@ jobs:
                 REMAINING_SECONDS=$((REMAINING_TIME % 60))
                 
                 echo ""
-                echo -e "${PURPLE}=== STATUS UPDATE ===${NC}"
+                echo -e "${PURPLE}=== STATUS UPDATE (SPEED MODE) ===${NC}"
                 echo "Uptime: ${HOURS}h ${MINUTES}m ${SECONDS}s"
-                echo "Remaining until restart: ${REMAINING_HOURS}h ${REMAINING_MINUTES}m ${REMAINING_SECONDS}s"
-                echo "Restarts: $RESTART_COUNT"
+                echo "Remaining: ${REMAINING_HOURS}h ${REMAINING_MINUTES}m ${REMAINING_SECONDS}s"
                 echo "Bots running: $(cat ~/bot_pids.txt 2>/dev/null | wc -w)"
+                echo "Thread Pool: 128"
                 echo "Time: $(date)"
                 echo ""
               fi
@@ -418,9 +496,15 @@ jobs:
           
           chmod +x bot_system.sh
       
-      - name: Run Bot System
+      - name: Run Bot System (SPEED MODE)
         run: |
-          echo "=== STARTING MULTI BOT SYSTEM 24/7 ==="
+          echo "=== STARTING MULTI BOT SYSTEM 24/7 (SPEED MODE) ==="
+          echo "Optimasi Kecepatan Aktif!"
+          echo "- DNS Cache: 5 menit"
+          echo "- Keep-Alive: Enabled"
+          echo "- Max Sockets: 256"
+          echo "- Thread Pool: 128"
+          echo "- TCP BBR: Enabled"
           echo "Workflow Lifetime: 6 JAM"
           echo ""
           
@@ -430,10 +514,10 @@ jobs:
         run: |
           while true; do
             sleep 300
-            echo "[$(date)] Workflow still running"
+            echo "[$(date)] Workflow still running (SPEED MODE)"
             
             if ! pgrep -f "bot_system.sh" > /dev/null; then
-              echo "WARNING: Bot system died! Restarting..."
+              echo "WARNING: Bot system died! Restarting (SPEED MODE)..."
               ./bot_system.sh &
             fi
           done
