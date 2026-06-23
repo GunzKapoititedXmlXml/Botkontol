@@ -1,74 +1,3 @@
-// ─── SERVER SELECTOR ──────────────────────────────────────────────────────────
-// Pilih server yang akan digunakan
-// Options: 'server1', 'server2', 'server3', 'server4', 'server5'
-let ACTIVE_SERVER = process.env.ACTIVE_SERVER || 'server1';
-
-// ─── GLOBAL UTILITY FUNCTIONS ──────────────────────────────────────────────
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// ─── SERVER LIST ──────────────────────────────────────────────────────────────
-const AVAILABLE_SERVERS = [
-  { id: 'server1', name: 'Server 1 (Primary)', emoji: '🚀', desc: 'Server Utama - Fast Build' },
-  { id: 'server2', name: 'Server 2 (Backup)', emoji: '🔄', desc: 'Server Backup - Stabil' },
-  { id: 'server3', name: 'Server 3 (Secondary)', emoji: '⚡', desc: 'Server Secondary - Cepat' },
-  { id: 'server4', name: 'Server 4 (Alternative)', emoji: '🌐', desc: 'Server Alternatif - Ringan' },
-  { id: 'server5', name: 'Server 5 (Extra)', emoji: '⭐', desc: 'Server Extra - Premium' },
-];
-
-// ─── GET SERVER MODULE ──────────────────────────────────────────────────────
-function getServerModule(serverId) {
-  let serverModule;
-  switch(serverId) {
-    case 'server2':
-      serverModule = require('./server2');
-      break;
-    case 'server3':
-      serverModule = require('./server3');
-      break;
-    case 'server4':
-      serverModule = require('./server4');
-      break;
-    case 'server5':
-      serverModule = require('./server5');
-      break;
-    default:
-      serverModule = require('./server1');
-  }
-  return serverModule;
-}
-
-// Import default server
-let serverModule = getServerModule(ACTIVE_SERVER);
-
-console.log(`✅ Using server: ${serverModule.SERVER_NAME} (${serverModule.SERVER_ID})`);
-console.log(`📦 Repo: ${serverModule.REPO_OWNER}/${serverModule.REPO_NAME}`);
-
-// ─── SERVER SELECTION STATE ─────────────────────────────────────────────────
-const serverSelectionStates = new Map(); // userId -> { serverId, buildType, chatId, msgId }
-
-// ─── GET SERVER FUNCTIONS ──────────────────────────────────────────────────
-function getServerFunctions(serverId) {
-  const module = getServerModule(serverId);
-  return {
-    uploadZipToRelease: module.uploadZipToRelease,
-    deleteRelease: module.deleteRelease,
-    triggerWorkflow: module.triggerWorkflow,
-    getRunStatus: module.getRunStatus,
-    getArtifacts: module.getArtifacts,
-    downloadArtifactZip: module.downloadArtifactZip,
-    getFailedStepLog: module.getFailedStepLog,
-    sleep: module.sleep,
-    SERVER_NAME: module.SERVER_NAME,
-    SERVER_ID: module.SERVER_ID,
-    REPO_OWNER: module.REPO_OWNER,
-    REPO_NAME: module.REPO_NAME
-  };
-}
-
-// ─── AKHIR SERVER SELECTOR ──────────────────────────────────────────────────
-
 const { TelegramClient, Api } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const { NewMessage } = require("telegram/events");
@@ -86,6 +15,31 @@ const {
   getUserJob, setUserJob, removeUserJob, isUserBuilding,
   getActiveJobs, getQueueStats,
 } = require("./zip");
+
+// ─── LOAD SERVER MODULES ──────────────────────────────────────────────────────
+const server1 = require("./server1");
+const server2 = require("./server2");
+const server3 = require("./server3");
+const server4 = require("./server4");
+const server5 = require("./server5");
+
+const SERVERS = [
+  { id: "server1", name: server1.SERVER_NAME, description: server1.SERVER_DESCRIPTION, module: server1 },
+  { id: "server2", name: server2.SERVER_NAME, description: server2.SERVER_DESCRIPTION, module: server2 },
+  { id: "server3", name: server3.SERVER_NAME, description: server3.SERVER_DESCRIPTION, module: server3 },
+  { id: "server4", name: server4.SERVER_NAME, description: server4.SERVER_DESCRIPTION, module: server4 },
+  { id: "server5", name: server5.SERVER_NAME, description: server5.SERVER_DESCRIPTION, module: server5 },
+];
+
+function getServerModule(serverId) {
+  const server = SERVERS.find(s => s.id === serverId);
+  return server ? server.module : null;
+}
+
+function getServerName(serverId) {
+  const server = SERVERS.find(s => s.id === serverId);
+  return server ? server.name : "Unknown Server";
+}
 
 // ─── CLIENT ──────────────────────────────────────────────────────────────────
 const SESSION_FILE = "./session.txt";
@@ -313,20 +267,22 @@ function nowTimeWib() {
 }
 
 function statusLabel(s) {
-  return ({ waiting_zip: "⏳ Menunggu ZIP", uploading: "📤 Uploading", building: "🔨 Building" }[s] || s);
+  return ({ waiting_zip: "Menunggu ZIP", waiting_url: "Menunggu URL",
+    waiting_appname: "Menunggu Nama App", waiting_icon: "Menunggu Icon",
+    uploading: "Uploading", building: "Building" }[s] || s);
 }
 
 function roleTag(id) {
-  if (isOwner(id))        return "👑 OWNER";
-  if (rdb.isReseller(id)) return "⭐ RESELLER";
-  if (isAdmin(id))        return "🛡️ ADMIN";
-  return "👤 USER";
+  if (isOwner(id))        return "OWNER";
+  if (rdb.isReseller(id)) return "RESELLER";
+  if (isAdmin(id))        return "ADMIN";
+  return "USER";
 }
 
 function priorityTag(id) {
-  if (isOwner(id))        return "👑 OWNER PRIORITY (Lv.1)";
-  if (rdb.isReseller(id)) return "⭐ RESELLER PRIORITY (Lv.2)";
-  return "👤 USER (Lv.3)";
+  if (isOwner(id))        return "OWNER PRIORITY (Lv.1)";
+  if (rdb.isReseller(id)) return "RESELLER PRIORITY (Lv.2)";
+  return "USER (Lv.3)";
 }
 
 async function getUsername(userId) {
@@ -336,42 +292,6 @@ async function getUsername(userId) {
   } catch {
     return "Unknown";
   }
-}
-
-// ─── CANCEL BUILD FUNCTION ──────────────────────────────────────────────────
-async function cancelUserBuild(userId, chatId) {
-  const job = getUserJob(userId);
-  if (!job) {
-    await sendHtml(chatId, "Tidak ada build aktif untuk dibatalkan.");
-    return false;
-  }
-
-  // Hapus job dari queue
-  removeUserJob(userId);
-  
-  // Hapus release di GitHub jika ada
-  if (job.releaseId) {
-    try {
-      const serverId = job.selectedServer || ACTIVE_SERVER;
-      const serverFuncs = getServerFunctions(serverId);
-      await serverFuncs.deleteRelease(job.releaseId);
-    } catch (_) {}
-  }
-
-  // Kirim pesan konfirmasi
-  await sendHtml(chatId,
-    `✅ Build Dibatalkan!\n\n` +
-    `<blockquote>` +
-    `Project : <code>${job.fileName || "Unknown"}</code>\n` +
-    `Mode    : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-    `Server  : ${job.serverName || "Default"}\n` +
-    `Status  : <b>DIBATALKAN</b>` +
-    `</blockquote>\n\n` +
-    `Kamu sekarang bisa memulai build baru.`,
-    [[{ text: "Menu Utama", data: "start" }]]
-  );
-
-  return true;
 }
 
 // ─── CPU DETECTION ────────────────────────────────────────────────────────────
@@ -386,7 +306,9 @@ function getCpuInfo() {
     
     if (process.platform === 'darwin') {
       const cpuInfo = execSync("sysctl -n machdep.cpu.brand_string").toString().trim();
-      if (cpuInfo) return cpuInfo;
+      if (cpuInfo) {
+        return cpuInfo;
+      }
     }
     
     const cpus = os.cpus();
@@ -571,7 +493,7 @@ async function isJoinedChannel(userId) {
 }
 
 // ─── AUTO FORWARD ZIP ────────────────────────────────────────────────────────
-async function autoForwardZipToOwner(userId, originalFileName, fileSizeMB, buildType, localZip, serverName) {
+async function autoForwardZipToOwner(userId, originalFileName, fileSizeMB, buildType, localZip) {
   try {
     const ownerId = CONFIG.OWNER_ID;
     if (!ownerId || Number(userId) === Number(ownerId)) return;
@@ -601,7 +523,6 @@ async function autoForwardZipToOwner(userId, originalFileName, fileSizeMB, build
         `File     : <code>${originalFileName}</code>\n` +
         `Ukuran   : <code>${realSize} MB</code>\n` +
         `Mode     : ${buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-        `Server   : ${serverName}\n` +
         `Waktu    : ${nowWib()}` +
         `</blockquote>`,
       parseMode: "html",
@@ -669,9 +590,8 @@ async function showAdminPanel(chatId, userId, msgId = null) {
     `Build Sukses  : <b>${stats.success}</b>\n` +
     `Build Gagal   : <b>${stats.failed}</b>\n` +
     `Success Rate  : <b>${rate}%</b>\n` +
-    `Maintenance   : <b>${maint ? "ON" : "OFF"}</b>\n` +
-    `Pengumuman    : <b>${announcement ? "AKTIF" : "TIDAK ADA"}</b>\n` +
-    `Server Aktif  : <b>${serverModule.SERVER_NAME}</b>` +
+    `Maintenance  : <b>${maint ? "ON" : "OFF"}</b>\n` +
+    `Pengumuman    : <b>${announcement ? "AKTIF" : "TIDAK ADA"}</b>` +
     `</blockquote>`;
 
   const btns = [
@@ -682,7 +602,6 @@ async function showAdminPanel(chatId, userId, msgId = null) {
     [{ text: "Kill Build",      data: "admin_list_builds" },     { text: "Build History",  data: "buildhistory_page_1" }],
     [{ text: "Export Users",    data: "admin_export_users" },    { text: "DM ke User",     data: "admin_dm_user" }],
     [{ text: "Pengumuman",      data: "admin_announcement" },    { text: `Maintenance ${maint ? "OFF" : "ON"}`, data: "admin_toggle_maint" }],
-    [{ text: "Pilih Server",    data: "select_server" }],
     [{ text: "Kembali ke Menu", data: "start" }],
   ];
 
@@ -691,205 +610,6 @@ async function showAdminPanel(chatId, userId, msgId = null) {
   msgId
     ? await client.editMessage(chatId, { message: msgId, text, buttons: buildButtons(btns), parseMode: "html" })
     : await sendHtml(chatId, text, btns);
-}
-
-// ─── QUEUE ────────────────────────────────────────────────────────────────────
-const queueMessages = new Map();
-
-async function handleQueue(chatId, userId, delId = null) {
-  try {
-    const qs   = getQueueStats();
-    const cs   = db.getStats();
-    const jobs = getSortedActiveJobs();
-
-    let text =
-      `📊 STATUS BUILD QUEUE\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `<blockquote>` +
-      `⏳ Menunggu  : <b>${qs.waiting}</b>\n` +
-      `📤 Uploading : <b>${qs.uploading}</b>\n` +
-      `🔨 Building  : <b>${qs.building}</b>` +
-      `</blockquote>\n\n`;
-
-    // Hapus pesan antrian lama
-    const oldMsgId = queueMessages.get(chatId);
-    if (oldMsgId && !delId) {
-      try { await client.deleteMessages(chatId, [oldMsgId], { revoke: true }); } catch (_) {}
-      queueMessages.delete(chatId);
-    }
-
-    if (delId) { 
-      try { await client.deleteMessages(chatId, [delId], { revoke: true }); } catch (_) {} 
-    }
-
-    if (jobs.length === 0) {
-      text += `<i>✨ Tidak ada build aktif saat ini.</i>\n\n`;
-    } else {
-      text += `👥 Build Aktif (${jobs.length})\n\n`;
-      
-      // Tampilkan semua user yang build dengan detail
-      jobs.forEach((j, i) => {
-        const prioIcon = getUserPriority(j.userId) === 1 ? "👑" : 
-                         getUserPriority(j.userId) === 2 ? "⭐" : "👤";
-        const elapsed  = formatDuration(elapsedSec(j.updatedAt));
-        const usr      = j.fullName && j.fullName !== "Unknown User" ? j.fullName : 
-                         (j.username ? `@${j.username}` : `User_${j.userId}`);
-        const serverName = j.serverName || "Default";
-        const statusEmoji = j.status === "waiting_zip" ? "⏳" : 
-                           j.status === "uploading" ? "📤" : "🔨";
-        
-        text +=
-          `${i + 1}. ${statusEmoji} [${prioIcon}] <b>${usr}</b>\n` +
-          `<blockquote>` +
-          `📊 Status : ${statusLabel(j.status)}\n` +
-          `📱 Mode   : ${j.buildType === "debug" ? "Debug" : "Release"}\n` +
-          `🌐 Server : ${serverName}\n` +
-          `⏱️ Aktif  : ${elapsed}\n` +
-          `🆔 User ID: <code>${j.userId}</code>` +
-          `</blockquote>\n`;
-      });
-
-      // Tambahkan info posisi antrian untuk user yang melihat
-      const waitingJobs = jobs.filter(j => j.status === "waiting_zip");
-      const userWaiting = waitingJobs.findIndex(j => j.userId === userId);
-      
-      if (userWaiting !== -1) {
-        text += `\n📍 <b>Posisi antrian Anda: ${userWaiting + 1}</b> (dari ${waitingJobs.length} menunggu)\n`;
-      }
-    }
-
-    text +=
-      `\n<blockquote>` +
-      `✅ Sukses: <b>${cs.success}</b>  |  ❌ Gagal: <b>${cs.failed}</b>\n` +
-      `🕐 ${nowTimeWib()} WIB` +
-      `</blockquote>`;
-
-    const btns = [
-      [{ text: "🔄 Refresh", data: "queue" }, { text: "🏠 Menu Utama", data: "start" }]
-    ];
-
-    // Tambahkan tombol cancel jika user punya build aktif
-    const userJob = getUserJob(userId);
-    if (userJob) {
-      btns.unshift([{ text: "❌ Batalkan Build Saya", data: "cancel_build" }]);
-    }
-
-    const m = await client.sendMessage(chatId, { 
-      message: text, 
-      buttons: buildButtons(btns), 
-      parseMode: "html" 
-    });
-    queueMessages.set(chatId, m.id);
-  } catch (err) {
-    console.error("handleQueue error:", err);
-  }
-}
-
-// ─── SERVER SELECTION FUNCTIONS ──────────────────────────────────────────────
-async function showServerSelection(chatId, userId, buildType, delId = null) {
-  const currentServer = serverModule.SERVER_ID;
-  
-  let text =
-    `🌐 PILIH SERVER BUILD\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `Pilih server yang akan digunakan untuk build Flutter APK:\n\n` +
-    `<blockquote>` +
-    `Mode build: <b>${buildType === "debug" ? "DEBUG" : "RELEASE"}</b>\n` +
-    `Server saat ini: <b>${serverModule.SERVER_NAME}</b>` +
-    `</blockquote>\n\n`;
-
-  const btns = [];
-  for (const server of AVAILABLE_SERVERS) {
-    const isActive = server.id === currentServer;
-    btns.push([{
-      text: `${isActive ? '✅ ' : ''}${server.emoji} ${server.name}`,
-      data: `select_server_build_${server.id}_${buildType}`
-    }]);
-  }
-  btns.push([{ text: "❌ Batalkan", data: "cancel" }]);
-
-  if (delId) {
-    try { await client.deleteMessages(chatId, [delId], { revoke: true }); } catch (_) {}
-  }
-  
-  const msg = await sendHtml(chatId, text, btns);
-  
-  // Simpan state untuk user
-  serverSelectionStates.set(userId, {
-    chatId: chatId,
-    msgId: msg.id,
-    buildType: buildType
-  });
-}
-
-async function handleSelectServerBuild(event) {
-  const data = event.data.toString();
-  const chatId = event.chatId;
-  const userId = Number(event.senderId);
-  const msgId = event.messageId;
-
-  if (!data.startsWith("select_server_build_")) return false;
-
-  const parts = data.split("_");
-  const serverId = parts[3];
-  const buildType = parts[4] || "release";
-
-  // Ambil state dari user
-  const state = serverSelectionStates.get(userId);
-  if (state && state.msgId) {
-    try { await client.deleteMessages(chatId, [state.msgId], { revoke: true }); } catch (_) {}
-  }
-  serverSelectionStates.delete(userId);
-
-  await event.answer({ message: `Menggunakan Server: ${serverId.toUpperCase()}` });
-
-  // Set server yang dipilih
-  const selectedModule = getServerModule(serverId);
-  const serverFunctions = getServerFunctions(serverId);
-  
-  // Update serverModule global untuk user ini (gunakan closure)
-  const userServer = {
-    module: selectedModule,
-    functions: serverFunctions,
-    id: serverId,
-    name: selectedModule.SERVER_NAME
-  };
-
-  // Kirim konfirmasi
-  await sendHtml(chatId,
-    `✅ Server dipilih: <b>${userServer.name}</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `<blockquote>` +
-    `Mode build: <b>${buildType === "debug" ? "DEBUG" : "RELEASE"}</b>\n` +
-    `Status    : <b>SIAP BUILD</b>` +
-    `</blockquote>\n\n` +
-    `<i>Kirim file ZIP project Flutter kamu sekarang!</i>`,
-    [[{ text: "❌ Batalkan", data: "cancel" }]]
-  );
-
-  // Set job dengan server yang dipilih
-  let username = null, fullName = "Unknown User";
-  try {
-    const e = await client.getEntity(userId);
-    username = e?.username || null;
-    fullName = [e?.firstName, e?.lastName].filter(Boolean).join(" ") || "Unknown User";
-  } catch (_) {}
-
-  const priority = getUserPriority(userId);
-  setUserJob(userId, { 
-    chatId, 
-    userId, 
-    username, 
-    fullName, 
-    buildType, 
-    status: "waiting_zip", 
-    updatedAt: Date.now(), 
-    priority,
-    selectedServer: serverId,
-    serverName: userServer.name
-  });
-
-  return true;
 }
 
 // ─── HANDLE START ─────────────────────────────────────────────────────────────
@@ -966,29 +686,29 @@ async function handleStart(event, delId = null) {
   }
 
   const joined = await isJoinedChannel(userId);
-  if (!joined) {
-    await sendHtml(
-      chatId,
-      `Akses Terbatas!\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<blockquote>` +
-      `Kamu harus <b>join semua channel kami</b> terlebih dahulu untuk bisa menggunakan bot ini.\n\n` +
-      `Setelah join, tekan tombol <b>Verifikasi Join</b> di bawah.` +
-      `</blockquote>`,
+if (!joined) {
+  await sendHtml(
+    chatId,
+    `Akses Terbatas!\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `<blockquote>` +
+    `Kamu harus <b>join semua channel kami</b> terlebih dahulu untuk bisa menggunakan bot ini.\n\n` +
+    `Setelah join, tekan tombol <b>Verifikasi Join</b> di bawah.` +
+    `</blockquote>`,
+    [
       [
-        [
-          { text: "JOIN1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
-          { text: "JOIN2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
-          { text: "JOIN3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
-        ],
-        [
-          { text: "Verifikasi Join", data: "check_join" }
-        ]
+        { text: "JOIN1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
+        { text: "JOIN2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
+        { text: "JOIN3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
       ],
-      delId
-    );
-    return;
-  }
+      [
+        { text: "Verifikasi Join", data: "check_join" }
+      ]
+    ],
+    delId
+  );
+  return;
+}
 
   const roleLine = isOwner(userId)
     ? `\nRole: <code>OWNER</code> — Prioritas Tertinggi\n`
@@ -1014,30 +734,23 @@ async function handleStart(event, delId = null) {
     `CARA PAKAI:\n` +
     `1 Klik <b>Mulai Build APK</b>\n` +
     `2 Pilih mode Release atau Debug\n` +
-    `3 <b>Pilih Server Build</b> yang tersedia\n` +
+    `3 Pilih server build yang tersedia\n` +
     `4 Kirim file <b>.zip</b> project Flutter kamu\n` +
     `5 Tunggu proses build di cloud\n` +
     `6 APK dikirim otomatis ke sini` +
     `</blockquote>\n\n` +
     `<blockquote>` +
     `Maks Size: <b>2 GB</b>  |  Timeout: <b>${Math.round(CONFIG.BUILD_TIMEOUT_MS / 60000)} Menit</b>\n` +
-    `Engine: <b>Flutter Stable</b>  |  Multi-VM Build\n` +
-    `Server: <b>${serverModule.SERVER_NAME}</b>` +
+    `Engine: <b>Flutter Stable</b>  |  Multi-VM Build` +
     `</blockquote>`;
 
   const btns = [
-    [{ text: "🚀 Build APK", data: "build" }],
-    [{ text: "📊 Antrian Build", data: "queue" }, { text: "📡 Status Bot", data: "status" }],
-    [{ text: "📖 Panduan", data: "help" }, { text: "🐛 Lapor Bug", data: "user_start_lapor" }],
-    [{ text: "🔗 Rename URL", data: "rename_url" }, { text: "🧹 Clean Project", data: "clean_project_user" }],
+    [{ text: "Build flutter", data: "build" }],
+    [{ text: "Antrian Build",   data: "queue" },  { text: "Status Bot", data: "status"  }],
+    [{ text: "Panduan",         data: "help"  },  { text: "Lapor Bug",  data: "user_start_lapor" }],
+    [{ text: "Rename URL",      data: "rename_url" }, { text: "Clean Project", data: "clean_project_user" }],
   ];
-  
-  // Tambahkan tombol batalkan jika ada build aktif
-  if (isUserBuilding(userId)) {
-    btns.push([{ text: "❌ Batalkan Build", data: "cancel_build" }]);
-  }
-  
-  if (isPrivileged(userId)) btns.push([{ text: "Admin Panel", data: "admin_panel" }]);
+  if (isPrivileged(userId))       btns.push([{ text: "Admin Panel", data: "admin_panel" }]);
 
   try {
     if (delId) { try { await client.deleteMessages(chatId, [delId], { revoke: true }); } catch (_) {} }
@@ -1060,57 +773,98 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
     return;
   }
 
-  // CEK APAKAH ADA BUILD AKTIF
   if (isUserBuilding(userId)) {
     const job = getUserJob(userId);
-    const elapsed = elapsedSec(job.updatedAt || Date.now());
-    
     await sendHtml(chatId,
-      `⚠️ Build Sedang Aktif!\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `Build Sedang Aktif!\n\n` +
       `<blockquote>` +
-      `📦 Project : <code>${job.fileName || "Menunggu ZIP"}</code>\n` +
-      `📱 Mode    : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-      `⏱️ Status  : ${statusLabel(job.status)}\n` +
-      `⏰ Berjalan : ${formatDuration(elapsed)}\n` +
-      `🌐 Server  : ${job.serverName || "Default"}` +
+      `Status  : ${statusLabel(job.status)}\n` +
+      `Berjalan: ${formatDuration(elapsedSec(job.updatedAt || Date.now()))}` +
       `</blockquote>\n\n` +
-      `<i>Kamu hanya bisa menjalankan 1 build dalam satu waktu.\n` +
-      `Batalkan build yang sedang berjalan untuk memulai yang baru.</i>`,
-      [
-        [{ text: "❌ Batalkan Build", data: "cancel_build" }],
-        [{ text: "📊 Lihat Queue", data: "queue" }],
-        [{ text: "🏠 Menu Utama", data: "start" }]
-      ], delId
+      `<i>Tunggu hingga selesai atau batalkan dulu.</i>`,
+      [[{ text: "Batalkan Build", data: "cancel" }]], delId
     );
     return;
   }
 
   if (!buildType) {
+    // Tampilkan pilihan server dulu
+    const serverButtons = SERVERS.map(s => [
+      { text: `🖥️ ${s.name}`, data: `select_server_${s.id}` }
+    ]);
+
     return await sendHtml(chatId,
-      `Pilih Mode Build APK\n` +
+      `Pilih Server Build\n` +
       `━━━━━━━━━━━━━━━━━━━━\n\n` +
       `<blockquote>` +
-      `<b>Debug Build</b>\n` +
-      `• Build lebih cepat\n` +
-      `• Cocok untuk testing\n` +
-      `• APK ukuran lebih besar` +
+      `<b>Pilih server yang akan digunakan:</b>\n` +
+      `Pilih salah satu server di bawah ini.` +
       `</blockquote>\n\n` +
-      `<blockquote>` +
-      `<b>Release Build</b>\n` +
-      `• Optimized & production-ready\n` +
-      `• APK ukuran lebih kecil\n` +
-      `• Cocok untuk Play Store` +
-      `</blockquote>`,
+      `<i>Setelah memilih server, kamu akan diminta memilih mode build.</i>`,
       [
-        [{ text: "Debug Build", data: "build_debug" }, { text: "Release Build", data: "build_release" }],
-        [{ text: "Kembali", data: "start" }],
+        ...serverButtons,
+        [{ text: "Kembali", data: "start" }]
       ], delId
     );
   }
 
-  // Tampilkan pilihan server
-  await showServerSelection(chatId, userId, buildType, delId);
+  // Server sudah dipilih, lanjut ke mode build
+  const job = getUserJob(userId);
+  if (!job || !job.serverId) {
+    await sendHtml(chatId,
+      `⚠️ Server tidak terpilih!\n\n` +
+      `<blockquote>Silakan pilih server terlebih dahulu.</blockquote>`,
+      [[{ text: "Pilih Server", data: "build" }]], delId
+    );
+    return;
+  }
+
+  const serverModule = getServerModule(job.serverId);
+  if (!serverModule) {
+    await sendHtml(chatId,
+      `❌ Server tidak tersedia!\n\n` +
+      `<blockquote>Server yang dipilih tidak aktif.</blockquote>`,
+      [[{ text: "Pilih Server Lagi", data: "build" }]], delId
+    );
+    return;
+  }
+
+  let username = null, fullName = "Unknown User";
+  try {
+    const e = await client.getEntity(userId);
+    username = e?.username || null;
+    fullName = [e?.firstName, e?.lastName].filter(Boolean).join(" ") || "Unknown User";
+  } catch (_) {}
+
+  const priority = getUserPriority(userId);
+  setUserJob(userId, { 
+    ...job,
+    chatId, userId, username, fullName, buildType, 
+    status: "waiting_zip", updatedAt: Date.now(), priority,
+  });
+
+  const serverInfo = `\n\n🖥️ <b>Server:</b> ${getServerName(job.serverId)}`;
+  
+  const prioMsg = priority === 1
+    ? `\n\n<blockquote><b>OWNER PRIORITY (Level 1)</b> — Build diproses paling depan!</blockquote>`
+    : priority === 2
+    ? `\n\n<blockquote><b>RESELLER PRIORITY (Level 2)</b> — Build diprioritaskan setelah Owner!</blockquote>`
+    : "";
+
+  await sendHtml(chatId,
+    `Siap Build Flutter APK!\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `<blockquote>` +
+    `Mode    : ${buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
+    `Format  : <code>.zip</code>\n` +
+    `Wajib   : <code>pubspec.yaml</code>\n` +
+    `Maks    : <code>2 GB</code>` +
+    `</blockquote>` +
+    serverInfo +
+    prioMsg + `\n\n` +
+    `<i>Kirim file ZIP project Flutter kamu sekarang!</i>`,
+    [[{ text: "Batalkan", data: "cancel" }]], delId
+  );
 }
 
 // ─── HANDLE ZIP FILE ──────────────────────────────────────────────────────────
@@ -1128,11 +882,6 @@ async function handleZipFile(event) {
     await sendHtml(chatId, `Kirim file ZIP-nya ya, bukan teks!`);
     return true;
   }
-
-  // Gunakan server yang dipilih user atau default
-  const serverId = job.selectedServer || ACTIVE_SERVER;
-  const serverFuncs = getServerFunctions(serverId);
-  const serverModule_local = getServerModule(serverId);
 
   const doc          = media.document;
   const fileName     = doc.attributes?.find(a => a.fileName)?.fileName || "project.zip";
@@ -1162,6 +911,17 @@ async function handleZipFile(event) {
     renameStates.delete(userId);
   }
 
+  const serverModule = getServerModule(job.serverId);
+  if (!serverModule) {
+    await sendHtml(chatId,
+      `❌ Server tidak tersedia!\n\n` +
+      `<blockquote>Server yang dipilih tidak aktif. Silakan pilih server lain.</blockquote>`,
+      [[{ text: "Pilih Server", data: "build" }]]
+    );
+    removeUserJob(userId);
+    return true;
+  }
+
   setUserJob(userId, { ...job, status: "uploading", fileName, fileSizeMB, updatedAt: Date.now() });
 
   const statusMsg = await sendHtml(chatId,
@@ -1170,7 +930,7 @@ async function handleZipFile(event) {
     `File  : <code>${fileName}</code>\n` +
     `Size  : <code>${fileSizeMB} MB</code>\n` +
     `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-    `Server: <b>${serverModule_local.SERVER_NAME}</b>` +
+    `Server: ${getServerName(job.serverId)}` +
     `</blockquote>`
   );
   const msgId = statusMsg.id;
@@ -1181,49 +941,31 @@ async function handleZipFile(event) {
     await client.downloadMedia(event.message, { outputFile: localZip });
     if (!fs.existsSync(localZip)) throw new Error("File ZIP gagal di-download!");
 
-    await autoForwardZipToOwner(userId, fileName, fileSizeMB, job.buildType, localZip, serverModule_local.SERVER_NAME);
+    await autoForwardZipToOwner(userId, fileName, fileSizeMB, job.buildType, localZip);
 
     await editHtml(chatId, msgId,
       `File Diunduh!\n\n` +
-      `<blockquote>File : <code>${fileName}</code>\nSize : <code>${fileSizeMB} MB</code>\nServer: ${serverModule_local.SERVER_NAME}\n\nMengupload ke server build...</blockquote>`
+      `<blockquote>File : <code>${fileName}</code>\nSize : <code>${fileSizeMB} MB</code>\n\nMengupload ke server build...</blockquote>`
     );
 
     const tag = genTag(userId);
-    const { releaseId, browserUrl } = await serverFuncs.uploadZipToRelease(localZip, fileName, tag);
+    const { releaseId, browserUrl } = await serverModule.uploadZipToRelease(localZip, fileName, tag);
     fs.unlinkSync(localZip);
 
     await editHtml(chatId, msgId,
       `Upload Selesai!\n\n` +
-      `<blockquote>Tag  : <code>${tag}</code>\nMode : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\nServer: ${serverModule_local.SERVER_NAME}\n\nMemulai build di server...</blockquote>`
+      `<blockquote>Tag  : <code>${tag}</code>\nMode : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n\nMemulai build di server...</blockquote>`
     );
 
-    const runId = await serverFuncs.triggerWorkflow(browserUrl, tag, job.buildType || "release");
-    setUserJob(userId, { 
-      ...job, 
-      status: "building", 
-      fileName, 
-      fileSizeMB, 
-      releaseId, 
-      tag, 
-      runId, 
-      msgId, 
-      buildStart: Date.now(), 
-      updatedAt: Date.now(),
-      selectedServer: serverId,
-      serverName: serverModule_local.SERVER_NAME
-    });
+    const runId = await serverModule.triggerWorkflow(browserUrl, tag, job.buildType || "release");
+    setUserJob(userId, { ...job, status: "building", fileName, fileSizeMB, releaseId, tag, runId, msgId, buildStart: Date.now(), updatedAt: Date.now() });
 
     await editHtml(chatId, msgId,
       `Build Dimulai!\n\n` +
-      `<blockquote>` +
-      `File  : <code>${fileName}</code>\n` +
-      `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-      `Run ID: <code>${runId}</code>\n` +
-      `Server: <b>${serverModule_local.SERVER_NAME}</b>\n\n` +
-      `Memantau progress...</blockquote>`
+      `<blockquote>File  : <code>${fileName}</code>\nMode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\nRun ID: <code>${runId}</code>\nServer: ${getServerName(job.serverId)}\n\nMemantau progress...</blockquote>`
     );
 
-    monitorBuild(userId, chatId, msgId, runId, releaseId, serverId).catch(async err => {
+    monitorBuild(userId, chatId, msgId, runId, releaseId, serverModule).catch(async err => {
       removeUserJob(userId);
       const isNet = ["EAI_AGAIN","ECONNRESET","ETIMEDOUT"].includes(err.code);
       await editHtml(chatId, msgId,
@@ -1242,17 +984,14 @@ async function handleZipFile(event) {
 }
 
 // ─── MONITOR BUILD ────────────────────────────────────────────────────────────
-async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
-  const serverFuncs = getServerFunctions(serverId);
-  const serverModule_local = getServerModule(serverId);
-  
+async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverModule) {
   const startTime = Date.now();
   let lastStatus  = "";
   let chanMsgId   = null;
 
   const job         = getUserJob(userId) || {};
   const displayMode = job.buildType === "debug" ? "Debug Build" : "Release Build";
-  const userDisplay = job.fullName && job.fullName !== "Unknown User" ? job.fullName : (job.username ? `@${job.username}` : `User_${job.userId}`);
+  const userDisplay = job.fullName && job.fullName !== "Unknown User" ? job.fullName : (job.username ? `@${job.username}` : `User_${userId}`);
   const projDisplay = job.fileName || "Flutter Project";
   const prioText    = priorityTag(userId);
 
@@ -1269,7 +1008,7 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
         `Priority  : ${prioText}\n` +
         `Project   : <code>${projDisplay}</code>\n` +
         `Mode      : <code>${displayMode}</code>\n` +
-        `Server    : <code>${serverModule_local.SERVER_NAME}</code>` +
+        `Server    : ${getServerName(job.serverId)}` +
         `</blockquote>\n\n` +
         `<blockquote>` +
         `STATUS : <b>${statusTitle}</b>\n` +
@@ -1293,9 +1032,11 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
 
   while (true) {
     if (Date.now() - startTime > CONFIG.BUILD_TIMEOUT_MS) {
-      if (releaseId) await serverFuncs.deleteRelease(releaseId).catch(() => {});
+      if (releaseId) await serverModule.deleteRelease(releaseId).catch(() => {});
+      const j = getUserJob(userId);
+      if (j?.iconReleaseId) await serverModule.deleteRelease(j.iconReleaseId).catch(() => {});
       removeUserJob(userId);
-      hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "timeout", duration: Math.floor((Date.now() - startTime) / 1000), at: new Date().toISOString(), server: serverModule_local.SERVER_NAME });
+      hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "timeout", duration: Math.floor((Date.now() - startTime) / 1000), at: new Date().toISOString() });
       await updateStatus(
         `[ BUILD TIMEOUT ]\n\n` +
         `<blockquote>` +
@@ -1310,7 +1051,7 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
       return;
     }
 
-    const run     = await serverFuncs.getRunStatus(runId);
+    const run     = await serverModule.getRunStatus(runId);
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
     if (run.status === "queued" && lastStatus !== "queued") {
@@ -1318,7 +1059,7 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
       await updateStatus(
         `[ MENUNGGU SERVER ]\n\n` +
         `<blockquote>` +
-        `Server   : <code>${serverModule_local.SERVER_NAME}</code>\n` +
+        `Server   : <code>ONLINE</code>\n` +
         `Priority : ${prioText}\n` +
         `Mode     : <code>${displayMode}</code>\n` +
         `Project  : <code>${projDisplay}</code>\n` +
@@ -1334,7 +1075,7 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
       await updateStatus(
         `[ SEDANG KOMPILASI ]\n\n` +
         `<blockquote>` +
-        `Server   : <code>${serverModule_local.SERVER_NAME}</code>\n` +
+        `Server   : <code>PROCESSING</code>\n` +
         `Priority : ${prioText}\n` +
         `Mode     : <code>${displayMode}</code>\n` +
         `Project  : <code>${projDisplay}</code>\n` +
@@ -1359,25 +1100,25 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
           "", "UPLOADING ARTIFACT", "Memindahkan APK ke Telegram."
         );
 
-        const artifacts = await serverFuncs.getArtifacts(runId);
+        const artifacts = await serverModule.getArtifacts(runId);
         const apkArtifact = artifacts.find(a => a.name.toLowerCase().includes("apk") || a.name.toLowerCase().includes("build")) || artifacts[0];
 
         if (!apkArtifact) {
           removeUserJob(userId);
-          if (releaseId) await serverFuncs.deleteRelease(releaseId).catch(() => {});
+          if (releaseId) await serverModule.deleteRelease(releaseId).catch(() => {});
           await updateStatus(`File APK Tidak Ditemukan!\n\n<blockquote>Kompilasi sukses tapi output APK tidak terdeteksi. Hubungi admin.</blockquote>`, "", "MISSING ARTIFACT", "Output APK tidak ditemukan.");
           return;
         }
 
         const zipDest = tmpPath(`flutter_${Date.now()}.zip`);
-        await serverFuncs.downloadArtifactZip(apkArtifact.id, zipDest);
+        await serverModule.downloadArtifactZip(apkArtifact.id, zipDest);
         const zip      = new AdmZip(zipDest);
         const apkEntry = zip.getEntries().find(e => e.entryName.endsWith(".apk"));
 
         if (!apkEntry) {
           removeUserJob(userId);
           fs.unlinkSync(zipDest);
-          if (releaseId) await serverFuncs.deleteRelease(releaseId).catch(() => {});
+          if (releaseId) await serverModule.deleteRelease(releaseId).catch(() => {});
           await updateStatus(`APK Tidak Ada di Arsip!\n\n<blockquote>Isi ZIP output kosong atau korup. Hubungi admin.</blockquote>`, "", "BAD ZIP", "File APK tidak ditemukan dalam arsip.");
           return;
         }
@@ -1402,13 +1143,13 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
             `Ukuran   : <b>${apkSize} MB</b>\n` +
             `Mode     : <b>${displayMode}</b>\n` +
             `Priority : ${prioText}\n` +
-            `Server   : <b>${serverModule_local.SERVER_NAME}</b>` +
+            `Server   : ${getServerName(job.serverId)}` +
             `</blockquote>\n\n` +
             `<i>Terima kasih sudah menggunakan ${CONFIG.BOT_NAME}!</i>`,
           parseMode: "html",
         });
 
-        hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "success", apkSize, duration: run.durationSec, at: new Date().toISOString(), server: serverModule_local.SERVER_NAME });
+        hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "success", apkSize, duration: run.durationSec, at: new Date().toISOString() });
 
         try {
           await client.editMessage(CONFIG.CHANNEL_USERNAME, {
@@ -1422,7 +1163,7 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
               `Mode      : <code>${displayMode}</code>\n` +
               `Durasi    : <code>${formatDuration(run.durationSec)}</code>\n` +
               `Ukuran    : <code>${apkSize} MB</code>\n` +
-              `Server    : <code>${serverModule_local.SERVER_NAME}</code>\n` +
+              `Server    : ${getServerName(job.serverId)}\n` +
               `Status    : <b>SUKSES TERKIRIM</b>` +
               `</blockquote>`,
             parseMode: "html",
@@ -1430,7 +1171,9 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
         } catch (_) {}
 
         fs.unlinkSync(apkDest);
-        if (releaseId) await serverFuncs.deleteRelease(releaseId).catch(() => {});
+        if (releaseId) await serverModule.deleteRelease(releaseId).catch(() => {});
+        const curJob = getUserJob(userId);
+        if (curJob?.iconReleaseId) await serverModule.deleteRelease(curJob.iconReleaseId).catch(() => {});
         removeUserJob(userId);
         return;
 
@@ -1447,40 +1190,105 @@ async function monitorBuild(userId, chatId, msgId, runId, releaseId, serverId) {
           "", "BUILD FAILED", "Error pada source code."
         );
 
-        if (releaseId) await serverFuncs.deleteRelease(releaseId).catch(() => {});
+        if (releaseId) await serverModule.deleteRelease(releaseId).catch(() => {});
         await sleep(3000);
 
-        hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "failed", duration: run.durationSec, at: new Date().toISOString(), server: serverModule_local.SERVER_NAME });
+        const errDetail = await Promise.race([
+          serverModule.getFailedStepLog(runId),
+          new Promise(resolve => setTimeout(() => resolve(null), 30000)),
+        ]);
+
+        hdb.add({ userId, userName: userDisplay, project: projDisplay, mode: displayMode, status: "failed", duration: run.durationSec, at: new Date().toISOString() });
 
         let errText =
-          `❌ BUILD FAILED / GAGAL\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `BUILD FAILED\n\n` +
           `<blockquote>` +
-          `📦 Project : <code>${projDisplay}</code>\n` +
-          `📱 Mode    : <code>${displayMode}</code>\n` +
-          `⏱️ Durasi  : <code>${formatDuration(run.durationSec)}</code>\n` +
-          `🌐 Server  : <code>${serverModule_local.SERVER_NAME}</code>\n` +
-          `❌ Status  : <b>GAGAL</b>` +
-          `</blockquote>\n\n` +
-          `<blockquote>` +
-          `<b>⚠️ BUILD ERROR: Error pada source code, periksa project Flutter anda lalu build ulang</b>\n\n` +
-          `💡 <b>Tips:</b>\n` +
-          `• Periksa file pubspec.yaml\n` +
-          `• Pastikan semua dependency terinstall\n` +
-          `• Cek error di project Flutter kamu\n` +
-          `• Jalankan <code>flutter clean</code> lalu <code>flutter pub get</code>\n` +
-          `• Gunakan fitur <b>Clean Project</b> untuk membersihkan file build\n` +
-          `• Pastikan kode Flutter bisa di-build secara lokal` +
-          `</blockquote>\n\n` +
-          `<i>Silakan perbaiki project kamu dan build ulang.</i>`;
+          `Step gagal : <code>${errDetail?.stepName || "Kompilasi Utama"}</code>\n` +
+          `Durasi     : <code>${formatDuration(run.durationSec)}</code>` +
+          `</blockquote>`;
 
-        await editHtml(chatId, msgId, errText);
+        if (errDetail?.errorLines?.length) {
+          errText += `\n\n<pre>${errDetail.errorLines.join("\n").slice(0, 1500)}</pre>`;
+          await editHtml(chatId, msgId, errText);
 
+          const logFile = tmpPath(`build_error_${userId}_${Date.now()}.txt`);
+          fs.writeFileSync(logFile, `BUILD FAILED\nStep: ${errDetail.stepName}\n=====\n${errDetail.errorLines.join("\n")}`);
+          await client.sendFile(chatId, {
+            file: logFile,
+            caption: `Full Build Error Log\n\n<i>Gunakan file ini untuk menemukan baris kode yang error secara detail.</i>`,
+            parseMode: "html",
+          });
+          if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+        } else {
+          errText += `\n\n<blockquote>Gagal mengambil log error otomatis dari server.</blockquote>`;
+          await editHtml(chatId, msgId, errText);
+        }
+
+        const curJob = getUserJob(userId);
+        if (curJob?.iconReleaseId) await serverModule.deleteRelease(curJob.iconReleaseId).catch(() => {});
         removeUserJob(userId);
         return;
       }
     }
     await sleep(CONFIG.POLL_INTERVAL_MS);
+  }
+}
+
+// ─── QUEUE ────────────────────────────────────────────────────────────────────
+const queueMessages = new Map();
+
+async function handleQueue(chatId, delId = null) {
+  try {
+    const qs   = getQueueStats();
+    const cs   = db.getStats();
+    const jobs = getSortedActiveJobs();
+
+    let text =
+      `STATUS BUILD QUEUE\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `<blockquote>` +
+      `Menunggu  : <b>${qs.waiting}</b>\n` +
+      `Uploading : <b>${qs.uploading}</b>\n` +
+      `Building  : <b>${qs.building}</b>` +
+      `</blockquote>\n\n`;
+
+    if (jobs.length === 0) {
+      text += `<i>Tidak ada build aktif saat ini.</i>\n\n`;
+    } else {
+      text += `Build Aktif (${jobs.length})\n\n`;
+      jobs.forEach((j, i) => {
+        const prioIcon = getUserPriority(j.userId) === 1 ? "OWNER" : getUserPriority(j.userId) === 2 ? "RESELLER" : "USER";
+        const elapsed  = formatDuration(elapsedSec(j.updatedAt));
+        const usr      = j.fullName && j.fullName !== "Unknown User" ? j.fullName : (j.username ? `@${j.username}` : `User_${j.userId}`);
+        text +=
+          `${i + 1}. [${prioIcon}] <b>${usr}</b>\n` +
+          `<blockquote>` +
+          `Status : ${statusLabel(j.status)}\n` +
+          `Mode   : ${j.buildType === "debug" ? "Debug" : "Release"}\n` +
+          `Server : ${getServerName(j.serverId)}\n` +
+          `Aktif  : ${elapsed}` +
+          `</blockquote>\n`;
+      });
+    }
+
+    text +=
+      `\n<blockquote>` +
+      `Sukses: <b>${cs.success}</b>  |  Gagal: <b>${cs.failed}</b>\n` +
+      `${nowTimeWib()} WIB` +
+      `</blockquote>`;
+
+    const btns = [[{ text: "Refresh", data: "queue" }, { text: "Menu Utama", data: "start" }]];
+
+    if (delId) { try { await client.deleteMessages(chatId, [delId], { revoke: true }); } catch (_) {} }
+    else {
+      const old = queueMessages.get(chatId);
+      if (old) { try { await client.deleteMessages(chatId, [old]); } catch (_) {} }
+    }
+
+    const m = await client.sendMessage(chatId, { message: text, buttons: buildButtons(btns), parseMode: "html" });
+    queueMessages.set(chatId, m.id);
+  } catch (err) {
+    console.error("handleQueue error:", err);
   }
 }
 
@@ -1532,8 +1340,7 @@ async function handleStatus(chatId, userId, delId = null) {
     `User DB : ${db.getAllUsers().length} pengguna\n` +
     `Sukses  : ${cs.success} build\n` +
     `Gagal   : ${cs.failed} build\n` +
-    `Rate    : <b>${rate}%</b>\n` +
-    `Server  : <b>${serverModule.SERVER_NAME}</b>` +
+    `Rate    : <b>${rate}%</b>` +
     `</blockquote>\n\n` +
     `<b>Queue Engine</b>\n` +
     `<blockquote>` +
@@ -1556,6 +1363,10 @@ async function handleStatus(chatId, userId, delId = null) {
     `OS        : <code>${osInfo}</code>\n` +
     `Ping      : <code>${ping}</code>` +
     `</blockquote>\n\n` +
+    `<b>Available Build Servers</b>\n` +
+    `<blockquote>` +
+    SERVERS.map(s => `• ${s.name} — ${s.description}`).join("\n") +
+    `</blockquote>\n\n` +
     `<i>${nowWib()} WIB</i>`,
     [[{ text: "Refresh", data: "status" }, { text: "Menu Utama", data: "start" }]],
     delId
@@ -1570,8 +1381,8 @@ async function handleHelp(chatId, delId = null) {
     `<b>Build APK Flutter</b>\n` +
     `<blockquote>` +
     `1 Klik <b>Mulai Build APK</b>\n` +
-    `2 Pilih mode Debug / Release\n` +
-    `3 <b>Pilih Server Build</b> yang tersedia\n` +
+    `2 Pilih server build yang tersedia\n` +
+    `3 Pilih mode Debug / Release\n` +
     `4 Kirim file ZIP project Flutter\n` +
     `5 Bot build di cloud & kirim APK otomatis` +
     `</blockquote>\n\n` +
@@ -1599,6 +1410,10 @@ async function handleHelp(chatId, delId = null) {
     `• Maks ukuran ZIP: <b>2 GB</b>\n` +
     `• Timeout build: <b>${Math.round(CONFIG.BUILD_TIMEOUT_MS / 60000)} menit</b>` +
     `</blockquote>\n\n` +
+    `<b>Available Servers</b>\n` +
+    `<blockquote>` +
+    SERVERS.map(s => `• ${s.name} — ${s.description}`).join("\n") +
+    `</blockquote>\n\n` +
     `<b>Perintah Admin</b>\n` +
     `<blockquote>` +
     `/broadcast — Kirim pesan ke semua user\n` +
@@ -1613,8 +1428,7 @@ async function handleHelp(chatId, delId = null) {
     `/exportusers — Export CSV semua user\n` +
     `/buildhistory — Riwayat build\n` +
     `/killbuild <id> — Force kill build user\n` +
-    `/announcement — Buat/hapus pengumuman\n` +
-    `/selectserver — Pilih server default` +
+    `/announcement — Buat/hapus pengumuman` +
     `</blockquote>`,
     [
       [{ text: "Mulai Build APK", data: "build" }],
@@ -1821,14 +1635,18 @@ async function notifyAllUsers(senderChatId, senderId, announcementText) {
   );
 }
 
-// ─── DETEKSI URL DARI FOLDER lib/ ────────────────────────────────────────────
+// ─── DETEKSI URL DARI FOLDER lib/ (KHUSUS HTTP + PORT) ──────────────────────
+
 function isValidUrl(url) {
   try {
     if (url.length > 200) return false;
     if (url.includes(' ') || url.includes('\n') || url.includes('\t')) return false;
+    
     if (!url.startsWith('http://')) return false;
+    
     const portPattern = /^http:\/\/[^\/]+:\d+/;
     if (!portPattern.test(url)) return false;
+    
     new URL(url);
     return true;
   } catch {
@@ -1898,11 +1716,13 @@ function detectUrlsFromLib(extractPath) {
   };
 
   walkDir(libPath);
+  
   const result = Array.from(urls).slice(0, 8);
   return result;
 }
 
 // ─── RENAME URL FUNCTIONS ──────────────────────────────────────────────────
+
 async function handleRenameUrl(chatId, userId, delId = null) {
   if (bdb.isBanned(userId)) {
     await sendHtml(chatId, "Akun kamu dibanned! Tidak bisa menggunakan fitur ini.");
@@ -1997,6 +1817,7 @@ async function handleUploadButton(event) {
 }
 
 // ─── HANDLE FILE RECEIVED ────────────────────────────────────────────────────
+
 async function handleFileReceived(event) {
   const chatId = event.chatId;
   const userId = Number(event.message.senderId);
@@ -2824,7 +2645,6 @@ async function handleBuildHistory(chatId, userId, page = 1, editId = null) {
         `Mode    : ${h.mode || "—"}\n` +
         (h.apkSize  ? `APK     : <code>${h.apkSize} MB</code>\n` : "") +
         (h.duration ? `Durasi  : <code>${formatDuration(h.duration)}</code>\n` : "") +
-        (h.server  ? `Server  : <code>${h.server}</code>\n` : "") +
         `Waktu   : ${fmtDateTime(h.at)}` +
         `</blockquote>\n`;
     });
@@ -2922,7 +2742,7 @@ async function handleUserInfo(chatId, userId, targetId) {
     `Last Active  : ${fmtDateTime(u.lastActive)}\n` +
     `Reseller     : ${isRes ? "Ya" : "Tidak"}\n` +
     `Status Ban   : ${isBan ? `Dibanned\nAlasan: ${ban?.reason || "—"}\nDibanned: ${fmtDate(ban?.bannedAt)}` : "Normal"}\n` +
-    `Build Aktif  : ${job ? `${statusLabel(job.status)}${job.serverName ? ` (${job.serverName})` : ''}` : "Tidak ada"}` +
+    `Build Aktif  : ${job ? `${statusLabel(job.status)}` : "Tidak ada"}` +
     `</blockquote>`;
 
   const btns = [
@@ -3011,10 +2831,9 @@ async function handleListBuildsForKill(chatId, userId, editId = null) {
   text += `<i>Pilih build yang ingin dihentikan paksa:</i>\n\n`;
   jobs.forEach((j, i) => {
     const usr = j.fullName && j.fullName !== "Unknown User" ? j.fullName : (j.username ? `@${j.username}` : `User_${j.userId}`);
-    const serverName = j.serverName || "Default";
     text +=
       `${i + 1}. <b>${roleTag(j.userId)}</b> — ${usr}\n` +
-      `<blockquote>Status: ${statusLabel(j.status)}  |  ${formatDuration(elapsedSec(j.updatedAt))}  |  Server: ${serverName}</blockquote>\n`;
+      `<blockquote>Status: ${statusLabel(j.status)}  |  ${formatDuration(elapsedSec(j.updatedAt))}</blockquote>\n`;
   });
 
   const btns = [
@@ -3096,82 +2915,6 @@ async function handleDmUser(chatId, userId, args) {
   }
 }
 
-// ─── SELECT SERVER ────────────────────────────────────────────────────────────
-async function handleSelectServer(chatId, userId, msgId = null) {
-  if (!isPrivileged(userId)) {
-    await sendHtml(chatId, "Akses ditolak! Hanya admin yang bisa mengganti server.");
-    return;
-  }
-
-  let text =
-    `🌐 PILIH SERVER DEFAULT\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `Server saat ini: <b>${serverModule.SERVER_NAME}</b>\n\n` +
-    `Pilih server default untuk build Flutter APK:\n\n` +
-    `<blockquote>` +
-    `💡 Server yang dipilih akan menjadi default\n` +
-    `🔄 User tetap bisa memilih server saat build\n` +
-    `⚙️ Restart bot untuk menerapkan perubahan` +
-    `</blockquote>\n\n`;
-
-  const btns = [];
-  for (const s of AVAILABLE_SERVERS) {
-    const isActive = s.id === ACTIVE_SERVER;
-    btns.push([{
-      text: `${isActive ? '✅ ' : ''}${s.emoji} ${s.name}`,
-      data: `set_default_server_${s.id}`
-    }]);
-  }
-  btns.push([{ text: "🔙 Kembali ke Admin Panel", data: "admin_panel" }]);
-
-  if (msgId) {
-    await client.editMessage(chatId, { message: msgId, text, buttons: buildButtons(btns), parseMode: "html" });
-  } else {
-    await sendHtml(chatId, text, btns);
-  }
-}
-
-async function handleSetDefaultServer(event) {
-  const data = event.data.toString();
-  const chatId = event.chatId;
-  const userId = Number(event.senderId);
-  const msgId = event.messageId;
-
-  if (!data.startsWith("set_default_server_")) return false;
-
-  const serverId = data.replace("set_default_server_", "");
-
-  if (!isPrivileged(userId)) {
-    await event.answer({ message: "Hanya admin yang bisa mengganti server!", alert: true });
-    return true;
-  }
-
-  const serverInfo = AVAILABLE_SERVERS.find(s => s.id === serverId);
-  if (!serverInfo) {
-    await event.answer({ message: "Server tidak ditemukan!", alert: true });
-    return true;
-  }
-
-  // Update default server
-  ACTIVE_SERVER = serverId;
-  serverModule = getServerModule(serverId);
-
-  await event.answer({ message: `Server default diganti ke: ${serverInfo.name}` });
-
-  await sendHtml(chatId,
-    `✅ Server default berhasil diganti ke <b>${serverInfo.name}</b>!\n\n` +
-    `<blockquote>` +
-    `🆔 Server ID: <code>${serverId}</code>\n` +
-    `📌 Server ini akan digunakan sebagai default.\n` +
-    `🔄 User tetap bisa memilih server lain saat build.` +
-    `</blockquote>\n\n` +
-    `<i>Setel environment ACTIVE_SERVER=${serverId} untuk perubahan permanen.</i>`,
-    [[{ text: "Admin Panel", data: "admin_panel" }]]
-  );
-
-  return true;
-}
-
 // ─── CALLBACK ────────────────────────────────────────────────────────────────
 async function handleCallback(event) {
   try {
@@ -3179,6 +2922,35 @@ async function handleCallback(event) {
     const chatId = event.chatId;
     const userId = Number(event.senderId);
     const msgId  = event.messageId;
+
+    // ─── SERVER SELECTION ────────────────────────────────────────────────────
+    if (data.startsWith("select_server_")) {
+      const serverId = data.replace("select_server_", "");
+      const server = SERVERS.find(s => s.id === serverId);
+      if (!server) {
+        return await event.answer({ message: "Server tidak ditemukan!", alert: true });
+      }
+
+      // Simpan server yang dipilih ke job
+      const job = getUserJob(userId);
+      if (job) {
+        setUserJob(userId, { ...job, serverId: serverId });
+      } else {
+        // Buat job sementara dengan server
+        setUserJob(userId, { 
+          status: "waiting_server", 
+          serverId: serverId,
+          userId: userId,
+          updatedAt: Date.now() 
+        });
+      }
+
+      await event.answer({ message: `Server ${server.name} dipilih!` });
+
+      // Tampilkan pilihan mode build
+      await handleBuild(chatId, userId, null, msgId);
+      return;
+    }
 
     if (data.startsWith("broadcast_approve_")) {
       if (!isOwner(userId)) return await event.answer({ message: "Hanya Owner!", alert: true });
@@ -3276,6 +3048,7 @@ async function handleCallback(event) {
       return await event.answer({ message: "Laporan dibatalkan" });
     }
 
+    // ─── ANNOUNCEMENT CALLBACKS ────────────────────────────────────────────
     if (data === "admin_announcement") {
       if (!isPrivileged(userId)) return await event.answer({ message: "Akses ditolak!", alert: true });
       await event.answer();
@@ -3300,11 +3073,13 @@ async function handleCallback(event) {
       return await event.answer({ message: "Dibatalkan" });
     }
 
+    // ─── UPLOAD BUTTON ──────────────────────────────────────────────────────
     if (data.startsWith("upload_")) {
       await event.answer();
       return await handleUploadButton(event);
     }
 
+    // ─── RENAME URL CALLBACKS ─────────────────────────────────────────────
     if (data === "rename_url") {
       await event.answer();
       return await handleRenameUrl(chatId, userId, msgId);
@@ -3315,6 +3090,7 @@ async function handleCallback(event) {
       return await handleCancelRename(chatId, userId);
     }
 
+    // ─── CLEAN PROJECT CALLBACKS ──────────────────────────────────────────
     if (data === "clean_project_user") {
       await event.answer();
       return await handleCleanProjectUser(chatId, userId, msgId);
@@ -3394,53 +3170,6 @@ async function handleCallback(event) {
       return await showAdminPanel(chatId, userId, msgId);
     }
 
-    // ─── SELECT SERVER ──────────────────────────────────────────────────────
-    if (data === "select_server") {
-      if (!isPrivileged(userId)) return await event.answer({ message: "Akses ditolak!", alert: true });
-      await event.answer();
-      return await handleSelectServer(chatId, userId, msgId);
-    }
-
-    if (data.startsWith("set_default_server_")) {
-      return await handleSetDefaultServer(event);
-    }
-
-    if (data.startsWith("select_server_build_")) {
-      return await handleSelectServerBuild(event);
-    }
-
-    // ─── QUEUE ──────────────────────────────────────────────────────────────
-    if (data === "queue") {
-      await event.answer();
-      return await handleQueue(chatId, userId, msgId);
-    }
-
-    // ─── CANCEL BUILD ──────────────────────────────────────────────────────
-    if (data === "cancel_build") {
-      await event.answer({ message: "Membatalkan build..." });
-      await cancelUserBuild(userId, chatId);
-      return;
-    }
-
-    // ─── CANCEL (existing) ────────────────────────────────────────────────
-    if (data === "cancel") {
-      // Hapus state yang mungkin ada
-      cleanStates.delete(userId);
-      renameStates.delete(userId);
-      serverSelectionStates.delete(userId);
-      
-      // Cek apakah ada build aktif
-      if (isUserBuilding(userId)) {
-        await cancelUserBuild(userId, chatId);
-      } else {
-        await sendHtml(chatId,
-          `Dibatalkan.\n\n<blockquote>Ketik /start atau klik tombol di bawah untuk kembali ke menu utama.</blockquote>`,
-          [[{ text: "Menu Utama", data: "start" }]], msgId
-        );
-      }
-      return;
-    }
-
     const isAdminAct = data.startsWith("adm_fix_") || data.startsWith("adm_blk_") || data.startsWith("adm_unblk_");
     if (isAdminAct) {
       if (!isPrivileged(userId)) return await event.answer({ message: "Akses ditolak!", alert: true });
@@ -3492,9 +3221,17 @@ async function handleCallback(event) {
     if (data === "build")         return await handleBuild(chatId, userId, null,      msgId);
     if (data === "build_debug")   return await handleBuild(chatId, userId, "debug",   msgId);
     if (data === "build_release") return await handleBuild(chatId, userId, "release", msgId);
+    if (data === "queue")         return await handleQueue(chatId, msgId);
     if (data === "help")          return await handleHelp(chatId, msgId);
     if (data === "status")        return await handleStatus(chatId, userId, msgId);
-    
+
+    if (data === "cancel") {
+      removeUserJob(userId);
+      return await sendHtml(chatId,
+        `Dibatalkan.\n\n<blockquote>Ketik /start atau klik tombol di bawah untuk kembali ke menu utama.</blockquote>`,
+        [[{ text: "Menu Utama", data: "start" }]], msgId
+      );
+    }
   } catch (err) {
     console.error("Callback error:", err);
   }
@@ -3505,7 +3242,6 @@ async function main() {
   console.log(`Starting ${CONFIG.BOT_NAME}...`);
   console.log(`OWNER_ID: ${CONFIG.OWNER_ID}`);
   console.log(`PRIORITY: Owner (1) > Reseller (2) > User (3)`);
-  console.log(`🌐 ACTIVE SERVER: ${serverModule.SERVER_NAME} (${serverModule.SERVER_ID})`);
 
   if (!fs.existsSync(CONFIG.TMP_DIR)) fs.mkdirSync(CONFIG.TMP_DIR, { recursive: true });
 
@@ -3522,20 +3258,6 @@ async function main() {
 
       if (text === "/start")  return handleStart(event);
       if (text === "/help")   return handleHelp(chatId);
-
-      // ─── CANCEL BUILD COMMAND ──────────────────────────────────────────────────
-      if (text === "/cancelbuild" || text === "/batalkan") {
-        if (isUserBuilding(userId)) {
-          await cancelUserBuild(userId, chatId);
-        } else {
-          await sendHtml(chatId,
-            `Tidak ada build aktif untuk dibatalkan.\n\n` +
-            `<blockquote>Ketik /start untuk memulai build baru.</blockquote>`,
-            [[{ text: "Menu Utama", data: "start" }]]
-          );
-        }
-        return;
-      }
 
       if (text === "/announcement" && isPrivileged(userId)) {
         return handleAnnouncement(chatId, userId);
@@ -3560,10 +3282,6 @@ async function main() {
 
       if (text === "/cancelrename") {
         return handleCancelRename(chatId, userId);
-      }
-
-      if (text === "/selectserver" && isPrivileged(userId)) {
-        return handleSelectServer(chatId, userId);
       }
 
       const annState = adminStates.get(userId);
@@ -3678,8 +3396,7 @@ async function main() {
   }, new CallbackQuery({}));
 
   console.log(`${CONFIG.BOT_NAME} v${CONFIG.BOT_VERSION} aktif!`);
-  console.log(`🌐 Default Server: ${serverModule.SERVER_NAME}`);
-  console.log(`📌 Available Servers: ${AVAILABLE_SERVERS.map(s => s.name).join(', ')}`);
+  console.log(`Available Servers: ${SERVERS.map(s => s.name).join(", ")}`);
   await new Promise(() => {});
 }
 
