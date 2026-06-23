@@ -1,0 +1,439 @@
+name: Bot 24/7 UNLIMITED LIMITS - MULTI BOT
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/59 * * * *'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 999999999
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Environment
+        run: |
+          echo "=========================================="
+          echo "  🚀 SETUP BOT ENVIRONMENT  🚀"
+          echo "=========================================="
+          
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            curl \
+            wget \
+            tree \
+            screen \
+            tmux || true
+          
+          export NODE_OPTIONS="--max-old-space-size=8192"
+          export UV_THREADPOOL_SIZE=64
+          export NODE_NO_WARNINGS=1
+          
+          echo "✅ Environment setup complete!"
+          echo "=========================================="
+      
+      - name: Setup Fake VPS Specs
+        run: |
+          echo "=== FAKE VPS SPECS ==="
+          echo "CPU Model: AMD EPYC 7763 64-Core Processor (Fake)"
+          echo "CPU Speed: 3.7 GHz (Fake)"
+          echo "VPS Type: AWS EC2 c6a.metal (Fake)"
+          
+          sudo mount -o remount,rw /proc 2>/dev/null || true
+          
+          cat > /tmp/fake_cpuinfo << 'EOF'
+          processor       : 0
+          vendor_id       : GenuineIntel
+          cpu family      : 6
+          model           : 85
+          model name      : Intel(R) Xeon(R) Platinum 8380 CPU @ 3.70GHz
+          stepping        : 7
+          microcode       : 0x1
+          cpu MHz         : 3700.000
+          cache size      : 49152 KB
+          physical id     : 0
+          siblings        : 128
+          core id         : 0
+          cpu cores       : 128
+          apicid          : 0
+          initial apicid  : 0
+          fpu             : yes
+          fpu_exception   : yes
+          cpuid level     : 27
+          wp              : yes
+          flags           : fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault invpcid_single pti ssbd ibrs ibpb stibp fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves arat avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid
+          bugs            : cpu_meltdown spectre_v1 spectre_v2 spec_store_bypass l1tf mds swapgs itlb_multihit mmio_stale_data
+          bogomips        : 7400.00
+          clflush size    : 64
+          cache_alignment : 64
+          address sizes   : 46 bits physical, 48 bits virtual
+          power management:
+          EOF
+          
+          sudo mount --bind /tmp/fake_cpuinfo /proc/cpuinfo 2>/dev/null || true
+          
+          echo "FAKE_CPU_MODEL=Intel Xeon Platinum 8380 @ 3.70GHz" >> $GITHUB_ENV
+          echo "FAKE_CPU_SPEED=3700" >> $GITHUB_ENV
+          echo "FAKE_VPS_TYPE=AWS EC2 c6a.metal - 128 vCPUs" >> $GITHUB_ENV
+          echo "FAKE_RAM=256GB DDR5 ECC" >> $GITHUB_ENV
+          echo "FAKE_STORAGE=NVMe SSD 4TB" >> $GITHUB_ENV
+          
+          echo ""
+          echo "=========================================="
+          echo "  🚀 VPS SPESIFIKASI FAKE 🚀"
+          echo "=========================================="
+          echo "CPU Model    : Intel Xeon Platinum 8380"
+          echo "CPU Speed    : 3.7 GHz (Turbo: 4.0 GHz)"
+          echo "CPU Cores    : 128 Core / 256 Threads"
+          echo "RAM          : 256 GB DDR5 ECC"
+          echo "Storage      : 4 TB NVMe SSD"
+          echo "VPS Type     : AWS EC2 c6a.metal"
+          echo "Network      : 100 Gbps"
+          echo "=========================================="
+          echo ""
+          
+          sudo swapoff -a 2>/dev/null || true
+          sudo rm -f /swapfile 2>/dev/null || true
+          sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo sysctl vm.swappiness=10 || true
+          sudo sysctl vm.vfs_cache_pressure=50 || true
+          
+          echo "=== Storage Configuration ==="
+          df -h
+          free -h
+      
+      - name: Display Bot Files Structure
+        run: |
+          echo "=========================================="
+          echo "  📁 BOT FILES STRUCTURE  📁"
+          echo "=========================================="
+          echo ""
+          echo "Root directory:"
+          ls -la
+          echo ""
+          
+          # Tampilkan semua folder
+          for dir in */; do
+            if [ -d "$dir" ] && [[ "$dir" != .* ]] && [[ "$dir" != "node_modules" ]]; then
+              echo "📂 Folder: $dir"
+              ls -la "$dir" | head -10
+              echo ""
+            fi
+          done
+          
+          # Tampilkan semua file JS di root
+          echo "📄 JavaScript files in root:"
+          ls -la *.js 2>/dev/null || echo "No JS files in root"
+          echo ""
+          
+          echo "=========================================="
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Dependencies for All Bots
+        run: |
+          echo "=== Installing dependencies ==="
+          npm install -g pm2
+          
+          # Cek package.json di root
+          if [ -f "package.json" ]; then
+            echo ">>> Found package.json in root"
+            npm install --no-audit --no-fund || {
+              npm install --legacy-peer-deps --no-audit --no-fund || true
+            }
+          fi
+          
+          # Cek package.json di setiap folder
+          for bot_dir in */; do
+            if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
+              continue
+            fi
+            
+            if [ -f "${bot_dir}package.json" ]; then
+              echo ">>> Found package.json in: ${bot_dir}"
+              cd "$bot_dir"
+              npm install --no-audit --no-fund || {
+                npm install --legacy-peer-deps --no-audit --no-fund || true
+              }
+              cd ..
+            fi
+          done
+          
+          # Install dependencies untuk bot tanpa package.json
+          for bot_dir in */; do
+            if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
+              continue
+            fi
+            
+            if [ -f "${bot_dir}index.js" ] || [ -f "${bot_dir}app.js" ] || [ -f "${bot_dir}main.js" ] || [ -f "${bot_dir}server.js" ] || [ -f "${bot_dir}bot.js" ]; then
+              if [ ! -f "${bot_dir}package.json" ]; then
+                echo ">>> No package.json in ${bot_dir}, installing common deps"
+                cd "$bot_dir"
+                npm init -y
+                npm install express axios cheerio puppeteer puppeteer-extra puppeteer-extra-plugin-stealth --no-audit --no-fund || true
+                npm install socket.io ws discord.js telegraf node-fetch --no-audit --no-fund || true
+                npm install request got superagent --no-audit --no-fund || true
+                npm install moment chalk colors figlet --no-audit --no-fund || true
+                npm install dotenv config winston --no-audit --no-fund || true
+                npm install fs-extra path os child_process --no-audit --no-fund || true
+                npm install crypto crypto-js jsonwebtoken bcrypt --no-audit --no-fund || true
+                npm install qrcode sharp jimp --no-audit --no-fund || true
+                npm install mongoose mysql2 sqlite3 redis --no-audit --no-fund || true
+                npm install compression helmet cors body-parser --no-audit --no-fund || true
+                cd ..
+              fi
+            fi
+          done
+      
+      - name: Create Bot System
+        run: |
+          cat > bot_system.sh << 'BOTSYSTEM'
+          #!/bin/bash
+          
+          # Configuration
+          RESTART_INTERVAL=21600  # 6 jam dalam detik
+          
+          # Colors
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[1;33m'
+          BLUE='\033[0;34m'
+          PURPLE='\033[0;35m'
+          CYAN='\033[0;36m'
+          NC='\033[0m'
+          
+          echo -e "${PURPLE}========================================${NC}"
+          echo -e "${CYAN}  🚀 MULTI BOT SYSTEM 24/7 🚀${NC}"
+          echo -e "${PURPLE}========================================${NC}"
+          echo ""
+          echo -e "${BLUE}=== MULTI BOT SYSTEM 24/7 ===${NC}"
+          echo "Workflow Lifetime: 6 JAM"
+          echo "Start time: $(date)"
+          echo ""
+          
+          # ============================================
+          # FUNCTION START ALL BOTS
+          # ============================================
+          start_all_bots() {
+            echo -e "${GREEN}[$(date)] Starting all bots...${NC}"
+            
+            export NODE_OPTIONS="--max-old-space-size=8192"
+            unset CI GITHUB_ACTIONS GITHUB_RUN_ID GITHUB_ACTION GITHUB_ACTOR
+            unset GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_WORKFLOW
+            
+            PIDS=""
+            BOT_COUNT=0
+            
+            # Cek bot di root
+            for main_file in index.js app.js main.js server.js bot.js; do
+              if [ -f "$main_file" ]; then
+                BOT_COUNT=$((BOT_COUNT + 1))
+                echo -e "${CYAN}[BOT $BOT_COUNT] Starting root bot: $main_file${NC}"
+                node "$main_file" &
+                PID=$!
+                PIDS="$PIDS $PID"
+              fi
+            done
+            
+            # Cek bot di setiap folder
+            for bot_dir in */; do
+              if [[ "$bot_dir" == .* ]] || [[ "$bot_dir" == "node_modules" ]]; then
+                continue
+              fi
+              
+              # Detect main file
+              MAIN_FILE=""
+              if [ -f "${bot_dir}package.json" ]; then
+                cd "$bot_dir"
+                MAIN_FILE=$(node -p "try{require('./package.json').main || ''}catch(e){''}" 2>/dev/null)
+                if [ -z "$MAIN_FILE" ] || [ ! -f "$MAIN_FILE" ]; then
+                  for possible in "index.js" "app.js" "main.js" "server.js" "bot.js"; do
+                    if [ -f "$possible" ]; then
+                      MAIN_FILE="$possible"
+                      break
+                    fi
+                  done
+                fi
+                cd ..
+              else
+                for possible in "index.js" "app.js" "main.js" "server.js" "bot.js"; do
+                  if [ -f "${bot_dir}$possible" ]; then
+                    MAIN_FILE="$possible"
+                    break
+                  fi
+                done
+              fi
+              
+              if [ -n "$MAIN_FILE" ]; then
+                BOT_COUNT=$((BOT_COUNT + 1))
+                echo -e "${CYAN}[BOT $BOT_COUNT] Starting: ${bot_dir} - $MAIN_FILE${NC}"
+                cd "$bot_dir"
+                node "$MAIN_FILE" &
+                PID=$!
+                PIDS="$PIDS $PID"
+                cd ..
+              fi
+            done
+            
+            echo "$PIDS" > ~/bot_pids.txt
+            echo -e "${GREEN}[$(date)] Started $BOT_COUNT bots with PIDs: $PIDS${NC}"
+            return 0
+          }
+          
+          # ============================================
+          # FUNCTION TRIGGER WORKFLOW BARU
+          # ============================================
+          trigger_new_workflow() {
+            echo -e "${BLUE}[$(date)] Triggering new workflow...${NC}"
+            
+            curl -X POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ github.workflow }}/dispatches \
+              -d '{"ref":"${{ github.ref_name }}"}'
+            
+            echo -e "${GREEN}[$(date)] New workflow triggered${NC}"
+          }
+          
+          # ============================================
+          # FUNCTION GRACEFUL SHUTDOWN
+          # ============================================
+          graceful_shutdown() {
+            echo -e "${YELLOW}[$(date)] Performing graceful shutdown...${NC}"
+            
+            if [ -f ~/bot_pids.txt ]; then
+              BOT_PIDS=$(cat ~/bot_pids.txt)
+              for PID in $BOT_PIDS; do
+                echo "  Stopping bot PID: $PID"
+                kill -15 $PID 2>/dev/null || true
+                sleep 1
+                kill -9 $PID 2>/dev/null || true
+              done
+            fi
+            
+            echo -e "${GREEN}[$(date)] Graceful shutdown complete${NC}"
+          }
+          
+          # ============================================
+          # MAIN EXECUTION
+          # ============================================
+          echo -e "${PURPLE}========================================${NC}"
+          echo -e "${CYAN}  🚀 MULTI BOT SYSTEM 24/7 🚀${NC}"
+          echo -e "${PURPLE}========================================${NC}"
+          
+          # Start bots
+          start_all_bots
+          
+          # Start timing
+          START_TIME=$(date +%s)
+          RESTART_COUNT=0
+          
+          echo ""
+          echo -e "${GREEN}=== SYSTEM RUNNING ===${NC}"
+          echo "Workflow Lifetime: 6 JAM"
+          echo "Start time: $(date)"
+          echo "Restart count: $RESTART_COUNT"
+          echo ""
+          
+          # MAIN LOOP
+          while true; do
+            sleep 60
+            
+            CURRENT_TIME=$(date +%s)
+            ELAPSED_TIME=$((CURRENT_TIME - START_TIME))
+            
+            # Check if it's time to restart workflow (6 JAM)
+            if [ $ELAPSED_TIME -ge $RESTART_INTERVAL ]; then
+              echo ""
+              echo -e "${PURPLE}========================================${NC}"
+              echo -e "${YELLOW}[$(date)] AUTO-RESTART TRIGGERED (6 JAM)${NC}"
+              echo -e "${PURPLE}========================================${NC}"
+              echo "Uptime: $((ELAPSED_TIME / 3600))h $(((ELAPSED_TIME % 3600) / 60))m $((ELAPSED_TIME % 60))s"
+              echo ""
+              
+              trigger_new_workflow
+              graceful_shutdown
+              
+              echo -e "${GREEN}[$(date)] Handing over to new workflow...${NC}"
+              exit 0
+              
+            else
+              # Check if bots are running
+              ALL_ALIVE=true
+              if [ -f ~/bot_pids.txt ]; then
+                BOT_PIDS=$(cat ~/bot_pids.txt)
+                for PID in $BOT_PIDS; do
+                  if ! kill -0 $PID 2>/dev/null; then
+                    echo -e "${RED}[WARNING] Bot PID $PID died!${NC}"
+                    ALL_ALIVE=false
+                  fi
+                done
+              fi
+              
+              if [ "$ALL_ALIVE" = false ]; then
+                echo -e "${YELLOW}Bot(s) died, restarting...${NC}"
+                if [ -f ~/bot_pids.txt ]; then
+                  BOT_PIDS=$(cat ~/bot_pids.txt)
+                  for PID in $BOT_PIDS; do
+                    kill -9 $PID 2>/dev/null || true
+                  done
+                fi
+                sleep 2
+                start_all_bots
+              fi
+              
+              # Show status every 5 minutes
+              if [ $((ELAPSED_TIME % 300)) -lt 60 ]; then
+                HOURS=$((ELAPSED_TIME / 3600))
+                MINUTES=$(((ELAPSED_TIME % 3600) / 60))
+                SECONDS=$((ELAPSED_TIME % 60))
+                REMAINING_TIME=$((RESTART_INTERVAL - ELAPSED_TIME))
+                REMAINING_HOURS=$((REMAINING_TIME / 3600))
+                REMAINING_MINUTES=$(((REMAINING_TIME % 3600) / 60))
+                REMAINING_SECONDS=$((REMAINING_TIME % 60))
+                
+                echo ""
+                echo -e "${PURPLE}=== STATUS UPDATE ===${NC}"
+                echo "Uptime: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+                echo "Remaining until restart: ${REMAINING_HOURS}h ${REMAINING_MINUTES}m ${REMAINING_SECONDS}s"
+                echo "Restarts: $RESTART_COUNT"
+                echo "Bots running: $(cat ~/bot_pids.txt 2>/dev/null | wc -w)"
+                echo "Time: $(date)"
+                echo ""
+              fi
+            fi
+          done
+          BOTSYSTEM
+          
+          chmod +x bot_system.sh
+      
+      - name: Run Bot System
+        run: |
+          echo "=== STARTING MULTI BOT SYSTEM 24/7 ==="
+          echo "Workflow Lifetime: 6 JAM"
+          echo ""
+          
+          ./bot_system.sh
+      
+      - name: Keep Workflow Alive
+        run: |
+          while true; do
+            sleep 300
+            echo "[$(date)] Workflow still running"
+            
+            if ! pgrep -f "bot_system.sh" > /dev/null; then
+              echo "WARNING: Bot system died! Restarting..."
+              ./bot_system.sh &
+            fi
+          done
