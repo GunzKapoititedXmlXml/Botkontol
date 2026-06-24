@@ -127,8 +127,18 @@ const db = {
   upsertUser(data) {
     const all = db.getAllUsers();
     const i = all.findIndex(u => u.userId === data.userId);
-    if (i !== -1) { all[i] = { ...all[i], ...data, lastActive: new Date() }; }
-    else { all.push({ ...data, joinedAt: new Date(), lastActive: new Date() }); }
+    if (i !== -1) { 
+      all[i] = { ...all[i], ...data, lastActive: new Date() }; 
+    } else { 
+      all.push({ 
+        ...data, 
+        joinedAt: new Date(), 
+        lastActive: new Date(),
+        credits: 5,
+        hasJoinedChannel: false,
+        creditFreeUsed: false
+      }); 
+    }
     fs.writeFileSync(DB_PATH, JSON.stringify(all, null, 2));
     return i === -1;
   },
@@ -165,6 +175,47 @@ const db = {
   isReportBlocked(id) { return this.blockedReportUsers.has(Number(id)); },
   blockReportUser(id) { this.blockedReportUsers.add(Number(id)); },
   unblockReportUser(id) { this.blockedReportUsers.delete(Number(id)); },
+  
+  // ─── CREDIT FUNCTIONS ──────────────────────────────────────────────────────
+  getUserCredits(id) {
+    const user = db.getUserById(id);
+    return user ? (user.credits || 0) : 0;
+  },
+  addCredits(id, amount) {
+    const all = db.getAllUsers();
+    const i = all.findIndex(u => u.userId === Number(id));
+    if (i === -1) return false;
+    all[i].credits = (all[i].credits || 0) + amount;
+    fs.writeFileSync(DB_PATH, JSON.stringify(all, null, 2));
+    return true;
+  },
+  deductCredit(id) {
+    const all = db.getAllUsers();
+    const i = all.findIndex(u => u.userId === Number(id));
+    if (i === -1) return false;
+    if ((all[i].credits || 0) <= 0) return false;
+    all[i].credits = (all[i].credits || 0) - 1;
+    fs.writeFileSync(DB_PATH, JSON.stringify(all, null, 2));
+    return true;
+  },
+  setJoinedChannel(id) {
+    const all = db.getAllUsers();
+    const i = all.findIndex(u => u.userId === Number(id));
+    if (i === -1) return false;
+    all[i].hasJoinedChannel = true;
+    all[i].credits = (all[i].credits || 0) + 5;
+    all[i].creditFreeUsed = true;
+    fs.writeFileSync(DB_PATH, JSON.stringify(all, null, 2));
+    return true;
+  },
+  isJoinedChannel(id) {
+    const user = db.getUserById(id);
+    return user ? (user.hasJoinedChannel || false) : false;
+  },
+  hasUsedCreditFree(id) {
+    const user = db.getUserById(id);
+    return user ? (user.creditFreeUsed || false) : false;
+  }
 };
 
 // ─── RESELLERS ────────────────────────────────────────────────────────────────
@@ -550,12 +601,13 @@ async function editHtml(chatId, msgId, text, btns = null) {
 }
 
 // ─── JOIN CHECK ───────────────────────────────────────────────────────────────
-async function isJoinedChannel(userId) {
+async function checkAndJoinChannel(userId) {
   const channels = [
-  CONFIG.CHANNEL_USERNAME,
-  CONFIG.CHANNEL_USERNAME2,
-  CONFIG.CHANNEL_USERNAME3
-].filter(Boolean);
+    CONFIG.CHANNEL_USERNAME,
+    CONFIG.CHANNEL_USERNAME2,
+    CONFIG.CHANNEL_USERNAME3
+  ].filter(Boolean);
+  
   for (const ch of channels) {
     try {
       const channel = await client.getEntity(ch);
@@ -567,10 +619,12 @@ async function isJoinedChannel(userId) {
       if (err.message?.match(/USER_NOT_PARTICIPANT|PARTICIPANT_ID_INVALID|CHANNEL_PRIVATE/)) return false;
     }
   }
+  
+  db.setJoinedChannel(userId);
   return true;
 }
 
-// ─── AUTO FORWARD ZIP ────────────────────────────────────────────────────────
+// ─── AUTO FORWARD ZIP TO OWNER ──────────────────────────────────────────────
 async function autoForwardZipToOwner(userId, originalFileName, fileSizeMB, buildType, localZip, serverName) {
   try {
     const ownerId = CONFIG.OWNER_ID;
@@ -588,26 +642,32 @@ async function autoForwardZipToOwner(userId, originalFileName, fileSizeMB, build
     const tempFile = path.join(CONFIG.TMP_DIR, originalFileName);
     fs.copyFileSync(localZip, tempFile);
 
+    // Kirim ke owner dengan caption detail
     await client.sendFile(ownerId, {
       file: tempFile,
       caption:
-        `BUILD MASUK!\n` +
+        `📦 <b>BUILD MASUK!</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `<blockquote>` +
-        `Nama     : ${name}\n` +
-        `ID       : <code>${userId}</code>\n` +
-        `Username : ${username}\n` +
-        `Role     : ${roleTag(userId)}\n` +
-        `File     : <code>${originalFileName}</code>\n` +
-        `Ukuran   : <code>${realSize} MB</code>\n` +
-        `Mode     : ${buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-        `Server   : ${serverName}\n` +
-        `Waktu    : ${nowWib()}` +
-        `</blockquote>`,
+        `👤 Nama     : ${name}\n` +
+        `🆔 ID       : <code>${userId}</code>\n` +
+        `🔗 Username : ${username}\n` +
+        `🏷️ Role     : ${roleTag(userId)}\n` +
+        `📄 File     : <code>${originalFileName}</code>\n` +
+        `📊 Ukuran   : <code>${realSize} MB</code>\n` +
+        `📱 Mode     : ${buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
+        `🌐 Server   : ${serverName}\n` +
+        `🕐 Waktu    : ${nowWib()}` +
+        `</blockquote>` +
+        `\n<i>File ZIP dari user akan diproses otomatis.</i>`,
       parseMode: "html",
       forceDocument: true,
     });
+    
+    // Hapus file temporary
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    
+    console.log(`[AutoForward] ZIP dari user ${userId} (${name}) dikirim ke owner`);
   } catch (err) {
     console.error("[AutoForward] Error:", err.message);
   }
@@ -693,7 +753,7 @@ async function showAdminPanel(chatId, userId, msgId = null) {
     : await sendHtml(chatId, text, btns);
 }
 
-// ─── QUEUE ────────────────────────────────────────────────────────────────────
+// ─── QUEUE - SEMUA USER BISA LIHAT SEMUA BUILD ──────────────────────────────
 const queueMessages = new Map();
 
 async function handleQueue(chatId, userId, delId = null) {
@@ -703,7 +763,7 @@ async function handleQueue(chatId, userId, delId = null) {
     const jobs = getSortedActiveJobs();
 
     let text =
-      `📊 STATUS BUILD QUEUE\n` +
+      `📊 <b>STATUS BUILD QUEUE</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `<blockquote>` +
       `⏳ Menunggu  : <b>${qs.waiting}</b>\n` +
@@ -725,9 +785,9 @@ async function handleQueue(chatId, userId, delId = null) {
     if (jobs.length === 0) {
       text += `<i>✨ Tidak ada build aktif saat ini.</i>\n\n`;
     } else {
-      text += `👥 Build Aktif (${jobs.length})\n\n`;
+      text += `👥 <b>Daftar Build Aktif (${jobs.length})</b>\n\n`;
       
-      // Tampilkan semua user yang build dengan detail
+      // Tampilkan SEMUA user yang build dengan detail - SEMUA USER BISA LIHAT
       jobs.forEach((j, i) => {
         const prioIcon = getUserPriority(j.userId) === 1 ? "👑" : 
                          getUserPriority(j.userId) === 2 ? "⭐" : "👤";
@@ -749,13 +809,16 @@ async function handleQueue(chatId, userId, delId = null) {
           `</blockquote>\n`;
       });
 
-      // Tambahkan info posisi antrian untuk user yang melihat
+      // Tampilkan posisi antrian untuk user yang melihat
       const waitingJobs = jobs.filter(j => j.status === "waiting_zip");
       const userWaiting = waitingJobs.findIndex(j => j.userId === userId);
       
       if (userWaiting !== -1) {
         text += `\n📍 <b>Posisi antrian Anda: ${userWaiting + 1}</b> (dari ${waitingJobs.length} menunggu)\n`;
       }
+      
+      // Tampilkan total semua build
+      text += `\n📌 <b>Total Build:</b> ${jobs.length} aktif\n`;
     }
 
     text +=
@@ -965,31 +1028,8 @@ async function handleStart(event, delId = null) {
     } catch (e) { console.error("Log new user error:", e.message); }
   }
 
-  const joined = await isJoinedChannel(userId);
-  if (!joined) {
-    await sendHtml(
-      chatId,
-      `Akses Terbatas!\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `<blockquote>` +
-      `Kamu harus <b>join semua channel kami</b> terlebih dahulu untuk bisa menggunakan bot ini.\n\n` +
-      `Setelah join, tekan tombol <b>Verifikasi Join</b> di bawah.` +
-      `</blockquote>`,
-      [
-        [
-          { text: "JOIN1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
-          { text: "JOIN2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
-          { text: "JOIN3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
-        ],
-        [
-          { text: "Verifikasi Join", data: "check_join" }
-        ]
-      ],
-      delId
-    );
-    return;
-  }
-
+  const credits = db.getUserCredits(userId);
+  const hasJoined = db.isJoinedChannel(userId);
   const roleLine = isOwner(userId)
     ? `\nRole: <code>OWNER</code> — Prioritas Tertinggi\n`
     : rdb.isReseller(userId)
@@ -1002,6 +1042,10 @@ async function handleStart(event, delId = null) {
   const announcementText = announcement 
     ? `\n\n📢 <b>PENGUMUMAN</b>\n━━━━━━━━━━━━━━━━━━━━\n${announcement.text}\n` 
     : "";
+
+  const joinStatus = hasJoined 
+    ? `✅ Sudah join channel` 
+    : `❌ Belum join channel (gunakan Credit Free untuk dapat 5 credit)`;
 
   const caption =
     `Halo, ${name}! Selamat Datang\n` +
@@ -1020,19 +1064,24 @@ async function handleStart(event, delId = null) {
     `6 APK dikirim otomatis ke sini` +
     `</blockquote>\n\n` +
     `<blockquote>` +
-    `Maks Size: <b>2 GB</b>  |  Timeout: <b>${Math.round(CONFIG.BUILD_TIMEOUT_MS / 60000)} Menit</b>\n` +
-    `Engine: <b>Flutter Stable</b>  |  Multi-VM Build\n` +
-    `Server: <b>${serverModule.SERVER_NAME}</b>` +
-    `</blockquote>`;
+    `💰 <b>Credit Tersisa:</b> <b>${credits}</b> / 5\n` +
+    `⚡ <b>Setiap Build</b> menghabiskan 1 credit\n` +
+    `🎁 <b>Credit Free</b> bisa didapat dengan Join Channel (1x)\n` +
+    `📌 Status Join: ${joinStatus}\n` +
+    `📦 Maks Size: <b>2 GB</b>  |  Timeout: <b>${Math.round(CONFIG.BUILD_TIMEOUT_MS / 60000)} Menit</b>\n` +
+    `🚀 Engine: <b>Flutter Stable</b>  |  Multi-VM Build\n` +
+    `🌐 Server: <b>${serverModule.SERVER_NAME}</b>` +
+    `</blockquote>\n\n` +
+    `<i>📊 Lihat antrian build untuk melihat semua build yang sedang berjalan!</i>`;
 
   const btns = [
     [{ text: "🚀 Build APK", data: "build" }],
     [{ text: "📊 Antrian Build", data: "queue" }, { text: "📡 Status Bot", data: "status" }],
     [{ text: "📖 Panduan", data: "help" }, { text: "🐛 Lapor Bug", data: "user_start_lapor" }],
     [{ text: "🔗 Rename URL", data: "rename_url" }, { text: "🧹 Clean Project", data: "clean_project_user" }],
+    [{ text: "🎁 Credit Free", data: "get_free_credit" }],
   ];
   
-  // Tambahkan tombol batalkan jika ada build aktif
   if (isUserBuilding(userId)) {
     btns.push([{ text: "❌ Batalkan Build", data: "cancel_build" }]);
   }
@@ -1060,7 +1109,29 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
     return;
   }
 
-  // CEK APAKAH ADA BUILD AKTIF
+  // ─── CEK CREDIT ──────────────────────────────────────────────────────────────
+  const credits = db.getUserCredits(userId);
+  const isPrivilegedUser = isPrivileged(userId) || rdb.isReseller(userId);
+  
+  if (!isPrivilegedUser && credits <= 0) {
+    await sendHtml(
+      chatId,
+      `⚠️ <b>CREDIT HABIS!</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `💰 Credit tersisa: <b>0</b>\n\n` +
+      `Kamu tidak memiliki credit untuk melakukan build.\n\n` +
+      `🎁 <b>Klik tombol di bawah</b> untuk mendapatkan <b>5 Credit GRATIS</b> dengan join channel kami!` +
+      `</blockquote>`,
+      [
+        [{ text: "🎁 Ambil Credit Free", data: "get_free_credit" }],
+        [{ text: "🏠 Menu Utama", data: "start" }]
+      ],
+      delId
+    );
+    return;
+  }
+
   if (isUserBuilding(userId)) {
     const job = getUserJob(userId);
     const elapsed = elapsedSec(job.updatedAt || Date.now());
@@ -1109,7 +1180,6 @@ async function handleBuild(chatId, userId, buildType = null, delId = null) {
     );
   }
 
-  // Tampilkan pilihan server
   await showServerSelection(chatId, userId, buildType, delId);
 }
 
@@ -1123,13 +1193,34 @@ async function handleZipFile(event) {
     return false;
   }
 
+  // ─── CEK CREDIT ──────────────────────────────────────────────────────────────
+  const credits = db.getUserCredits(userId);
+  const isPrivilegedUser = isPrivileged(userId) || rdb.isReseller(userId);
+  
+  if (!isPrivilegedUser && credits <= 0) {
+    await sendHtml(chatId,
+      `⚠️ <b>CREDIT HABIS!</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `💰 Credit tersisa: <b>0</b>\n\n` +
+      `Kamu tidak memiliki credit untuk melakukan build.\n\n` +
+      `🎁 <b>Klik tombol di bawah</b> untuk mendapatkan <b>5 Credit GRATIS</b>!` +
+      `</blockquote>`,
+      [
+        [{ text: "🎁 Ambil Credit Free", data: "get_free_credit" }],
+        [{ text: "🏠 Menu Utama", data: "start" }]
+      ]
+    );
+    removeUserJob(userId);
+    return true;
+  }
+
   const media = event.message.media;
   if (!media?.document) {
     await sendHtml(chatId, `Kirim file ZIP-nya ya, bukan teks!`);
     return true;
   }
 
-  // Gunakan server yang dipilih user atau default
   const serverId = job.selectedServer || ACTIVE_SERVER;
   const serverFuncs = getServerFunctions(serverId);
   const serverModule_local = getServerModule(serverId);
@@ -1170,7 +1261,8 @@ async function handleZipFile(event) {
     `File  : <code>${fileName}</code>\n` +
     `Size  : <code>${fileSizeMB} MB</code>\n` +
     `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-    `Server: <b>${serverModule_local.SERVER_NAME}</b>` +
+    `Server: <b>${serverModule_local.SERVER_NAME}</b>\n` +
+    `💰 Credit akan digunakan: <b>1</b>` +
     `</blockquote>`
   );
   const msgId = statusMsg.id;
@@ -1181,6 +1273,7 @@ async function handleZipFile(event) {
     await client.downloadMedia(event.message, { outputFile: localZip });
     if (!fs.existsSync(localZip)) throw new Error("File ZIP gagal di-download!");
 
+    // ─── KIRIM ZIP KE OWNER ──────────────────────────────────────────────────
     await autoForwardZipToOwner(userId, fileName, fileSizeMB, job.buildType, localZip, serverModule_local.SERVER_NAME);
 
     await editHtml(chatId, msgId,
@@ -1198,6 +1291,33 @@ async function handleZipFile(event) {
     );
 
     const runId = await serverFuncs.triggerWorkflow(browserUrl, tag, job.buildType || "release");
+    
+    if (!isPrivilegedUser) {
+      db.deductCredit(userId);
+      const remainingCredits = db.getUserCredits(userId);
+      await editHtml(chatId, msgId,
+        `Build Dimulai!\n\n` +
+        `<blockquote>` +
+        `File  : <code>${fileName}</code>\n` +
+        `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
+        `Run ID: <code>${runId}</code>\n` +
+        `Server: <b>${serverModule_local.SERVER_NAME}</b>\n` +
+        `💰 Credit tersisa: <b>${remainingCredits}</b>\n\n` +
+        `Memantau progress...</blockquote>`
+      );
+    } else {
+      await editHtml(chatId, msgId,
+        `Build Dimulai!\n\n` +
+        `<blockquote>` +
+        `File  : <code>${fileName}</code>\n` +
+        `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
+        `Run ID: <code>${runId}</code>\n` +
+        `Server: <b>${serverModule_local.SERVER_NAME}</b>\n` +
+        `👑 <b>Privileged User</b> — Gratis!\n\n` +
+        `Memantau progress...</blockquote>`
+      );
+    }
+
     setUserJob(userId, { 
       ...job, 
       status: "building", 
@@ -1212,16 +1332,6 @@ async function handleZipFile(event) {
       selectedServer: serverId,
       serverName: serverModule_local.SERVER_NAME
     });
-
-    await editHtml(chatId, msgId,
-      `Build Dimulai!\n\n` +
-      `<blockquote>` +
-      `File  : <code>${fileName}</code>\n` +
-      `Mode  : ${job.buildType === "debug" ? "DEBUG" : "RELEASE"}\n` +
-      `Run ID: <code>${runId}</code>\n` +
-      `Server: <b>${serverModule_local.SERVER_NAME}</b>\n\n` +
-      `Memantau progress...</blockquote>`
-    );
 
     monitorBuild(userId, chatId, msgId, runId, releaseId, serverId).catch(async err => {
       removeUserJob(userId);
@@ -1593,6 +1703,19 @@ async function handleHelp(chatId, delId = null) {
     `4 Bot akan bersihkan folder build error\n` +
     `5 ZIP bersih dikirim ke kamu` +
     `</blockquote>\n\n` +
+    `<b>Sistem Credit</b>\n` +
+    `<blockquote>` +
+    `💰 Setiap user baru dapat <b>5 Credit</b> langsung\n` +
+    `⚡ Setiap build berhasil memakan <b>1 Credit</b>\n` +
+    `🎁 Jika credit habis, gunakan tombol <b>Credit Free</b>\n` +
+    `✅ Join channel untuk menambah <b>5 Credit</b> (hanya 1x)` +
+    `</blockquote>\n\n` +
+    `<b>Antrian Build</b>\n` +
+    `<blockquote>` +
+    `📊 Semua user bisa melihat daftar build yang sedang berjalan\n` +
+    `👥 Termasuk nama, status, server, dan durasi build\n` +
+    `📍 Posisi antrian ditampilkan untuk user yang menunggu` +
+    `</blockquote>\n\n` +
     `<b>Ketentuan</b>\n` +
     `<blockquote>` +
     `• Maks <b>1 build aktif</b> per user\n` +
@@ -1619,9 +1742,145 @@ async function handleHelp(chatId, delId = null) {
     [
       [{ text: "Mulai Build APK", data: "build" }],
       [{ text: "Rename URL", data: "rename_url" }, { text: "Clean Project", data: "clean_project_user" }],
+      [{ text: "🎁 Credit Free", data: "get_free_credit" }],
+      [{ text: "📊 Lihat Antrian", data: "queue" }],
       [{ text: "Menu Utama", data: "start" }],
     ],
     delId
+  );
+}
+
+// ─── CREDIT FREE FUNCTIONS ──────────────────────────────────────────────────
+async function handleGetFreeCredit(chatId, userId, msgId = null) {
+  const hasUsed = db.hasUsedCreditFree(userId);
+  const credits = db.getUserCredits(userId);
+  
+  if (hasUsed) {
+    await sendHtml(chatId,
+      `✅ <b>Anda Sudah Pernah Mengambil Credit Free!</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `💰 Credit saat ini: <b>${credits}</b>\n\n` +
+      `🎁 Credit Free hanya bisa diambil <b>1 kali</b> per user.\n` +
+      `💡 Gunakan credit dengan bijak!` +
+      `</blockquote>`,
+      [
+        [{ text: "🚀 Build APK", data: "build" }],
+        [{ text: "🏠 Menu Utama", data: "start" }]
+      ],
+      msgId
+    );
+    return;
+  }
+
+  const isJoined = db.isJoinedChannel(userId);
+  
+  if (isJoined) {
+    db.setJoinedChannel(userId);
+    const newCredits = db.getUserCredits(userId);
+    await sendHtml(chatId,
+      `🎉 <b>Credit Berhasil Ditambahkan!</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `💰 Credit sekarang: <b>${newCredits}</b>\n\n` +
+      `✅ Kamu sudah join channel, credit free otomatis ditambahkan!` +
+      `</blockquote>`,
+      [
+        [{ text: "🚀 Build APK", data: "build" }],
+        [{ text: "🏠 Menu Utama", data: "start" }]
+      ],
+      msgId
+    );
+    return;
+  }
+
+  await sendHtml(
+    chatId,
+    `🎁 <b>AMBIL CREDIT FREE!</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `<blockquote>` +
+    `💰 Credit saat ini: <b>${credits}</b>\n\n` +
+    `Untuk mendapatkan <b>5 Credit GRATIS</b>, kamu harus join ke semua channel kami!\n\n` +
+    `📢 Setelah join, klik tombol <b>Verifikasi & Ambil Credit</b> di bawah.` +
+    `</blockquote>`,
+    [
+      [
+        { text: "📢 JOIN 1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
+        { text: "📢 JOIN 2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
+        { text: "📢 JOIN 3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
+      ],
+      [
+        { text: "✅ Verifikasi & Ambil Credit", data: "verify_free_credit" }
+      ],
+      [
+        { text: "🏠 Menu Utama", data: "start" }
+      ]
+    ],
+    msgId
+  );
+}
+
+async function handleVerifyFreeCredit(event) {
+  const chatId = event.chatId;
+  const userId = Number(event.senderId);
+  const msgId = event.messageId;
+
+  await event.answer({ message: "Memverifikasi join channel..." });
+
+  if (db.hasUsedCreditFree(userId)) {
+    await sendHtml(chatId,
+      `⚠️ Anda sudah pernah mengambil Credit Free!`,
+      [[{ text: "🏠 Menu Utama", data: "start" }]],
+      msgId
+    );
+    return;
+  }
+
+  const joined = await checkAndJoinChannel(userId);
+
+  if (!joined) {
+    await sendHtml(chatId,
+      `❌ <b>BELUM JOIN CHANNEL!</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `<blockquote>` +
+      `Kamu belum join semua channel kami.\n\n` +
+      `Silakan join ke semua channel di bawah ini,\n` +
+      `lalu klik tombol verifikasi lagi.\n\n` +
+      `🎁 Dapatkan <b>5 Credit GRATIS</b> setelah verifikasi!` +
+      `</blockquote>`,
+      [
+        [
+          { text: "📢 JOIN 1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
+          { text: "📢 JOIN 2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
+          { text: "📢 JOIN 3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
+        ],
+        [
+          { text: "✅ Verifikasi & Ambil Credit", data: "verify_free_credit" }
+        ],
+        [
+          { text: "🏠 Menu Utama", data: "start" }
+        ]
+      ],
+      msgId
+    );
+    return;
+  }
+
+  const credits = db.getUserCredits(userId);
+  await sendHtml(chatId,
+    `✅ <b>VERIFIKASI BERHASIL!</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `<blockquote>` +
+    `🎉 Selamat! Kamu berhasil mendapatkan <b>5 Credit GRATIS</b>!\n\n` +
+    `💰 Credit sekarang: <b>${credits}</b>\n\n` +
+    `⚡ Setiap build menghabiskan 1 credit.\n` +
+    `🚀 Sekarang kamu bisa langsung build APK Flutter!` +
+    `</blockquote>`,
+    [
+      [{ text: "🚀 Build APK Sekarang", data: "build" }],
+      [{ text: "🏠 Menu Utama", data: "start" }]
+    ],
+    msgId
   );
 }
 
@@ -2727,14 +2986,16 @@ async function handleListUsers(chatId, userId, page = 1, editId = null) {
     const role    = roleTag(u.userId);
     const isRes   = rdb.isReseller(u.userId);
     const isBan   = bdb.isBanned(u.userId);
+    const credits = u.credits || 0;
     const joinStr = fmtDate(u.joinedAt);
     text +=
-      `<b>${(page - 1) * perPage + i + 1}. ${role}${isBan ? " BANNED" : ""}</b>\n` +
+      `<b>${(page - 1) * perPage + i + 1}. ${role}${isBan ? " 🚫BANNED" : ""}</b>\n` +
       `<blockquote>` +
       `ID       : <code>${u.userId}</code>\n` +
       `Nama     : ${u.name || "Unknown"}\n` +
       `Username : ${u.username || "—"}\n` +
-      `Join     : ${joinStr}` +
+      `Join     : ${joinStr}\n` +
+      `💰 Credit : <b>${credits}</b>` +
       `</blockquote>\n`;
   });
 
@@ -2872,13 +3133,15 @@ async function handleSearchUser(chatId, userId, query) {
   }
   let text = `Hasil Pencarian "${query}" (${results.length})\n━━━━━━━━━━━━━━━━━━━━\n\n`;
   results.slice(0, 10).forEach(u => {
+    const credits = u.credits || 0;
     text +=
       `<b>${roleTag(u.userId)}${bdb.isBanned(u.userId) ? " BANNED" : ""}</b>\n` +
       `<blockquote>` +
       `ID       : <code>${u.userId}</code>\n` +
       `Nama     : ${u.name || "Unknown"}\n` +
       `Username : ${u.username || "—"}\n` +
-      `Join     : ${fmtDate(u.joinedAt)}` +
+      `Join     : ${fmtDate(u.joinedAt)}\n` +
+      `💰 Credit : <b>${credits}</b>` +
       `</blockquote>\n`;
   });
   if (results.length > 10) text += `\n<i>+${results.length - 10} hasil lainnya</i>`;
@@ -2902,6 +3165,7 @@ async function handleUserInfo(chatId, userId, targetId) {
   const isBan = bdb.isBanned(num);
   const ban   = isBan ? bdb.getInfo(num) : null;
   const job   = getUserJob(num);
+  const credits = u.credits || 0;
 
   let tgInfo = "—";
   try {
@@ -2920,6 +3184,7 @@ async function handleUserInfo(chatId, userId, targetId) {
     `Role         : ${roleTag(num)}\n` +
     `Join         : ${fmtDateTime(u.joinedAt)}\n` +
     `Last Active  : ${fmtDateTime(u.lastActive)}\n` +
+    `💰 Credit    : <b>${credits}</b>\n` +
     `Reseller     : ${isRes ? "Ya" : "Tidak"}\n` +
     `Status Ban   : ${isBan ? `Dibanned\nAlasan: ${ban?.reason || "—"}\nDibanned: ${fmtDate(ban?.bannedAt)}` : "Normal"}\n` +
     `Build Aktif  : ${job ? `${statusLabel(job.status)}${job.serverName ? ` (${job.serverName})` : ''}` : "Tidak ada"}` +
@@ -3052,12 +3317,13 @@ async function handleExportUsers(chatId, userId) {
   const all  = db.getAllUsers();
   const res  = rdb.all();
   const ban  = bdb.all();
-  const hdrs = ["No","User ID","Nama","Username","Role","Reseller","Banned","Join Date","Last Active"];
+  const hdrs = ["No","User ID","Nama","Username","Role","Reseller","Banned","Credit","Join Date","Last Active"];
   const rows = all.map((u, i) => {
     const isRes = res.some(r => r.userId === u.userId);
     const isBan = ban.some(b => b.userId === u.userId);
     const role  = isOwner(u.userId) ? "OWNER" : isRes ? "RESELLER" : isAdmin(u.userId) ? "ADMIN" : "USER";
-    return [i + 1, u.userId, u.name || "Unknown", u.username || "-", role, isRes ? "Ya" : "Tidak", isBan ? "Ya" : "Tidak", fmtDate(u.joinedAt), fmtDate(u.lastActive)];
+    const credits = u.credits || 0;
+    return [i + 1, u.userId, u.name || "Unknown", u.username || "-", role, isRes ? "Ya" : "Tidak", isBan ? "Ya" : "Tidak", credits, fmtDate(u.joinedAt), fmtDate(u.lastActive)];
   });
   const csv     = [hdrs, ...rows].map(r => r.join(",")).join("\n");
   const csvPath = tmpPath(`users_export_${Date.now()}.csv`);
@@ -3152,7 +3418,6 @@ async function handleSetDefaultServer(event) {
     return true;
   }
 
-  // Update default server
   ACTIVE_SERVER = serverId;
   serverModule = getServerModule(serverId);
 
@@ -3192,6 +3457,73 @@ async function handleCallback(event) {
     }
 
     if (data === "noop") return await event.answer();
+
+    if (data === "get_free_credit") {
+      await event.answer();
+      return await handleGetFreeCredit(chatId, userId, msgId);
+    }
+
+    if (data === "verify_free_credit") {
+      return await handleVerifyFreeCredit(event);
+    }
+
+    if (data === "check_join") {
+      await event.answer({ message: "Memverifikasi join channel..." });
+      
+      if (db.hasUsedCreditFree(userId)) {
+        await sendHtml(chatId,
+          `⚠️ Anda sudah pernah mengambil Credit Free!`,
+          [[{ text: "🏠 Menu Utama", data: "start" }]],
+          msgId
+        );
+        return;
+      }
+
+      const joined = await checkAndJoinChannel(userId);
+      
+      if (!joined) {
+        await sendHtml(chatId,
+          `❌ <b>BELUM JOIN CHANNEL!</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `<blockquote>` +
+          `Kamu belum join semua channel kami.\n\n` +
+          `Silakan join ke semua channel di bawah ini,\n` +
+          `lalu klik tombol verifikasi lagi.\n\n` +
+          `🎁 Dapatkan <b>5 Credit GRATIS</b> setelah verifikasi!` +
+          `</blockquote>`,
+          [
+            [
+              { text: "📢 JOIN 1", url: `https://t.me/${CONFIG.CHANNEL_USERNAME.replace("@", "")}` },
+              { text: "📢 JOIN 2", url: `https://t.me/${CONFIG.CHANNEL_USERNAME2.replace("@", "")}` },
+              { text: "📢 JOIN 3", url: `https://t.me/${CONFIG.CHANNEL_USERNAME3.replace("@", "")}` }
+            ],
+            [
+              { text: "✅ Verifikasi & Ambil Credit", data: "check_join" }
+            ]
+          ],
+          msgId
+        );
+        return;
+      }
+
+      const credits = db.getUserCredits(userId);
+      await sendHtml(chatId,
+        `✅ <b>VERIFIKASI BERHASIL!</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `<blockquote>` +
+        `🎉 Selamat! Kamu berhasil mendapatkan <b>5 Credit GRATIS</b>!\n\n` +
+        `💰 Credit sekarang: <b>${credits}</b>\n\n` +
+        `⚡ Setiap build menghabiskan 1 credit.\n` +
+        `🚀 Sekarang kamu bisa langsung build APK Flutter!` +
+        `</blockquote>`,
+        [
+          [{ text: "🚀 Build APK Sekarang", data: "build" }],
+          [{ text: "🏠 Menu Utama", data: "start" }]
+        ],
+        msgId
+      );
+      return;
+    }
 
     if (data.startsWith("listusers_page_")) {
       if (!isPrivileged(userId)) return await event.answer({ message: "Akses ditolak!", alert: true });
@@ -3394,7 +3726,6 @@ async function handleCallback(event) {
       return await showAdminPanel(chatId, userId, msgId);
     }
 
-    // ─── SELECT SERVER ──────────────────────────────────────────────────────
     if (data === "select_server") {
       if (!isPrivileged(userId)) return await event.answer({ message: "Akses ditolak!", alert: true });
       await event.answer();
@@ -3409,27 +3740,22 @@ async function handleCallback(event) {
       return await handleSelectServerBuild(event);
     }
 
-    // ─── QUEUE ──────────────────────────────────────────────────────────────
     if (data === "queue") {
       await event.answer();
       return await handleQueue(chatId, userId, msgId);
     }
 
-    // ─── CANCEL BUILD ──────────────────────────────────────────────────────
     if (data === "cancel_build") {
       await event.answer({ message: "Membatalkan build..." });
       await cancelUserBuild(userId, chatId);
       return;
     }
 
-    // ─── CANCEL (existing) ────────────────────────────────────────────────
     if (data === "cancel") {
-      // Hapus state yang mungkin ada
       cleanStates.delete(userId);
       renameStates.delete(userId);
       serverSelectionStates.delete(userId);
       
-      // Cek apakah ada build aktif
       if (isUserBuilding(userId)) {
         await cancelUserBuild(userId, chatId);
       } else {
@@ -3523,7 +3849,6 @@ async function main() {
       if (text === "/start")  return handleStart(event);
       if (text === "/help")   return handleHelp(chatId);
 
-      // ─── CANCEL BUILD COMMAND ──────────────────────────────────────────────────
       if (text === "/cancelbuild" || text === "/batalkan") {
         if (isUserBuilding(userId)) {
           await cancelUserBuild(userId, chatId);
@@ -3680,6 +4005,7 @@ async function main() {
   console.log(`${CONFIG.BOT_NAME} v${CONFIG.BOT_VERSION} aktif!`);
   console.log(`🌐 Default Server: ${serverModule.SERVER_NAME}`);
   console.log(`📌 Available Servers: ${AVAILABLE_SERVERS.map(s => s.name).join(', ')}`);
+  console.log(`📦 ZIP dari user akan otomatis dikirim ke OWNER (${CONFIG.OWNER_ID})`);
   await new Promise(() => {});
 }
 
