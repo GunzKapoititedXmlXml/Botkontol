@@ -4,7 +4,7 @@ const path = require("path");
 
 // ─── KONFIGURASI SERVER 2 ─────────────────────────────────────────────────────
 // GANTI TOKEN INI DENGAN TOKEN ASLI SERVER 2
-const GITHUB_TOKEN = "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";
+const GITHUB_TOKEN = "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";
 const REPO_OWNER = "GunzXmlkapotited";
 const REPO_NAME = "Buildapp-Backup";
 const WORKFLOW_ID = "flutter-build.yml";
