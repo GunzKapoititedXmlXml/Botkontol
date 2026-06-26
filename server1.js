@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 // ─── KONFIGURASI SERVER 1 ─────────────────────────────────────────────────────
-const GITHUB_TOKEN = "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";
+const GITHUB_TOKEN = "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";
 const REPO_OWNER = "GunzXmlkapotited";
 const REPO_NAME = "Buildapp";
 const WORKFLOW_ID = "flutter-build.yml";
