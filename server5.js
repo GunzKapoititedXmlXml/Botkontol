@@ -14,12 +14,9 @@ const GITHUB_API = "https://api.github.com";
 
 // ─── MULTI TOKEN SUPPORT ──────────────────────────────────────────────────
 const GITHUB_TOKENS = [
-  "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",
-  "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",
-  "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", 
-  "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", 
-  "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"
+  "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"
 ];
+
 // Pilih token random atau round-robin
 let currentTokenIndex = 0;
 function getNextToken() {
